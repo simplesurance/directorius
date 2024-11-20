@@ -1,0 +1,8 @@
+/directorius
+
+*~
+*.swp
+*.swo
+*.orig
+
+release/
