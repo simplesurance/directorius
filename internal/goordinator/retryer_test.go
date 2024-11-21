@@ -58,7 +58,7 @@ func TestRetryAfterInThePast(t *testing.T) {
 		return goorderr.NewRetryableError(errors.New("err"), time.Now().Add(-time.Second))
 	}, nil)
 
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorIs(t, err, context.DeadlineExceeded) // nolint:testifylint
 
 	require.GreaterOrEqual(t, len(retryTimes), 2)
 
@@ -88,14 +88,14 @@ func TestBackoffInterval(t *testing.T) {
 		return goorderr.NewRetryableAnytimeError(errors.New("err"))
 	}, nil)
 
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorIs(t, err, context.DeadlineExceeded) //nolint:testifylint
 
 	require.GreaterOrEqual(t, len(retryTimes), 2)
 	for i := 1; i < len(retryTimes); i++ {
 		d := retryTimes[i].Sub(retryTimes[i-1])
 		require.GreaterOrEqualf(t, d, minInterval(r),
 			"time between retry %d and %d is %s, expected >=%s",
-			i-1, i, retryTimes[i-1], retryTimes[i], d, minInterval(r),
+			i-1, i, d, minInterval(r),
 		)
 	}
 }
@@ -132,7 +132,7 @@ func TestBackOffIntervalReachesMaxElapsedTime(t *testing.T) {
 		d := retryTimes[i].Sub(retryTimes[i-1])
 		require.GreaterOrEqualf(t, d, minInterval(r),
 			"time between retry %d and %d is %s, expected >=%s",
-			i-1, i, retryTimes[i-1], retryTimes[i], d, minInterval(r),
+			i-1, i, d, minInterval(r),
 		)
 	}
 }
