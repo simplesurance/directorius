@@ -38,7 +38,7 @@ archives:
     builds_info:
       group: 0
       owner: 0
-      mode: 0644
+      mode: 0744
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
