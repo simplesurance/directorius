@@ -218,7 +218,7 @@ func mustParseCfg() *cfg.Config {
 		exitOnErr(fmt.Sprintf("could not load configuration file: %s", *args.ConfigFile), err)
 	}
 
-	config.Autoupdater.Endpoint = normalizeHTTPEndpoint(config.Autoupdater.Endpoint)
+	config.WebInterfaceEndpoint = normalizeHTTPEndpoint(config.WebInterfaceEndpoint)
 
 	return config
 }
@@ -308,13 +308,13 @@ func normalizeHTTPEndpoint(endpoint string) string {
 }
 
 func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt.Client, mux *http.ServeMux) (*autoupdate.Autoupdater, chan<- *github.Event) {
-	if !config.Autoupdater.TriggerOnAutoMerge && len(config.Autoupdater.Labels) == 0 {
+	if !config.TriggerOnAutoMerge && len(config.TriggerOnLabels) == 0 {
 		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: trigger_on_auto_merge must be true or trigger_labels must be defined, both are empty in the configuration file\n", *args.ConfigFile)
 		os.Exit(1)
 	}
 
-	if len(config.Autoupdater.HeadLabel) == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: config file %s: autoupdater.queue_pr_head_label must be provided when autoupdater is enabled\n", *args.ConfigFile)
+	if len(config.HeadLabel) == 0 {
+		fmt.Fprintf(os.Stderr, "ERROR: config file %s: queue_pr_head_label must be provided when autoupdater is enabled\n", *args.ConfigFile)
 		os.Exit(1)
 	}
 
@@ -324,17 +324,17 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt
 	}
 
 	if len(config.HTTPGithubWebhookEndpoint) == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: config file :%s: github_webhook_endpoint must be provided when autoupdater is enabled\n", *args.ConfigFile)
+		fmt.Fprintf(os.Stderr, "ERROR: config file %s: github_webhook_endpoint must be provided when autoupdater is enabled\n", *args.ConfigFile)
 		os.Exit(1)
 	}
 
-	if len(config.Autoupdater.Repositories) == 0 {
+	if len(config.Repositories) == 0 {
 		logger.Info("github pull request updater is disabled, autoupdater.repository config field is empty")
 		return nil, nil
 	}
 
-	repos := make([]autoupdate.Repository, 0, len(config.Autoupdater.Repositories))
-	for _, r := range config.Autoupdater.Repositories {
+	repos := make([]autoupdate.Repository, 0, len(config.Repositories))
+	for _, r := range config.Repositories {
 		repos = append(repos, autoupdate.Repository{
 			OwnerLogin:     r.Owner,
 			RepositoryName: r.RepositoryName,
@@ -348,19 +348,19 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt
 		ch,
 		goordinator.NewRetryer(),
 		repos,
-		config.Autoupdater.TriggerOnAutoMerge,
-		config.Autoupdater.Labels,
-		config.Autoupdater.HeadLabel,
+		config.TriggerOnAutoMerge,
+		config.TriggerOnLabels,
+		config.HeadLabel,
 		autoupdate.DryRun(*args.DryRun),
 	)
 	autoupdater.Start()
 
-	if config.Autoupdater.Endpoint != "" {
-		autoupdater.HTTPService().RegisterHandlers(mux, config.Autoupdater.Endpoint)
+	if config.WebInterfaceEndpoint != "" {
+		autoupdater.HTTPService().RegisterHandlers(mux, config.WebInterfaceEndpoint)
 		logger.Info(
 			"registered github pull request autoupdater http endpoint",
 			logfields.Event("autoupdater_http_handler_registered"),
-			zap.String("endpoint", config.Autoupdater.Endpoint),
+			zap.String("endpoint", config.WebInterfaceEndpoint),
 		)
 	}
 
@@ -399,10 +399,10 @@ func main() {
 		zap.String("log_time_key", config.LogTimeKey),
 		zap.String("log_level", config.LogLevel),
 		zap.String("prometheus_metrics_endpoint", config.PrometheusMetricsEndpoint),
-		zap.Bool("autoupdater.trigger_on_auto_merge", config.Autoupdater.TriggerOnAutoMerge),
-		zap.Strings("autoupdater.labels", config.Autoupdater.Labels),
-		zap.Any("autoupdater.repositories", config.Autoupdater.Repositories),
-		zap.String("autoupdater.http_endpoint", config.Autoupdater.Endpoint),
+		zap.Bool("trigger_on_auto_merge", config.TriggerOnAutoMerge),
+		zap.Strings("trigger_labels", config.TriggerOnLabels),
+		zap.Any("repositories", config.Repositories),
+		zap.String("webinterface_endpoint", config.WebInterfaceEndpoint),
 	)
 
 	goodbye.Register(func(_ context.Context, sig os.Signal) {
