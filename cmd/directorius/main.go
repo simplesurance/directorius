@@ -403,6 +403,9 @@ func main() {
 		zap.Strings("trigger_labels", config.TriggerOnLabels),
 		zap.Any("repositories", config.Repositories),
 		zap.String("webinterface_endpoint", config.WebInterfaceEndpoint),
+		zap.String("ci.base_url", config.CI.BaseURL),
+		zap.String("ci.basic_auth.user", config.CI.BasicAuth.User),
+		zap.String("ci.basic_auth.password", hide(config.CI.BasicAuth.User)),
 	)
 
 	goodbye.Register(func(_ context.Context, sig os.Signal) {
