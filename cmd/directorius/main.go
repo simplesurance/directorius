@@ -309,22 +309,22 @@ func normalizeHTTPEndpoint(endpoint string) string {
 
 func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt.Client, mux *http.ServeMux) (*autoupdate.Autoupdater, chan<- *github.Event) {
 	if !config.Autoupdater.TriggerOnAutoMerge && len(config.Autoupdater.Labels) == 0 {
-		fmt.Fprintf(os.Stderr, "trigger_on_auto_merge must be true or trigger_labels must be defined, both are empty in the configuration file")
+		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: trigger_on_auto_merge must be true or trigger_labels must be defined, both are empty in the configuration file\n", *args.ConfigFile)
 		os.Exit(1)
 	}
 
 	if len(config.Autoupdater.HeadLabel) == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: config file %s: autoupdater.queue_pr_head_label must be provided when autoupdater is enabled", *args.ConfigFile)
+		fmt.Fprintf(os.Stderr, "ERROR: config file %s: autoupdater.queue_pr_head_label must be provided when autoupdater is enabled\n", *args.ConfigFile)
 		os.Exit(1)
 	}
 
 	if len(config.GithubAPIToken) == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: config file %s: github_api_token must be provided when autoupdater is enabled", *args.ConfigFile)
+		fmt.Fprintf(os.Stderr, "ERROR: config file %s: github_api_token must be provided when autoupdater is enabled\n", *args.ConfigFile)
 		os.Exit(1)
 	}
 
 	if len(config.HTTPGithubWebhookEndpoint) == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: config file :%s: github_webhook_endpoint must be provided when autoupdater is enabled", *args.ConfigFile)
+		fmt.Fprintf(os.Stderr, "ERROR: config file :%s: github_webhook_endpoint must be provided when autoupdater is enabled\n", *args.ConfigFile)
 		os.Exit(1)
 	}
 
