@@ -33,7 +33,7 @@ const (
 var logger *zap.Logger
 
 // Version is set via a ldflag on compilation
-var Version = "unknown"
+var Version = "version unknown"
 
 const EventChannelBufferSize = 1024
 
