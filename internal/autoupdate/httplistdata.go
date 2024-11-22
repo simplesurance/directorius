@@ -14,12 +14,12 @@ type httpListQueue struct {
 // httpListData is used as template data when rending the autoupdater list
 // page.
 type httpListData struct {
-	Queues                  []*httpListQueue
-	TriggerOnAutomerge      bool
-	TriggerLabels           []string
-	MonitoredRepositories   []string
-	PeriodicTriggerInterval time.Duration
-	ProcessedEvents         uint64
+	Queues                       []*httpListQueue
+	TriggerOnAutomerge           bool
+	TriggerLabels                []string
+	MonitoredRepositoriesitories []string
+	PeriodicTriggerInterval      time.Duration
+	ProcessedEvents              uint64
 
 	// CreatedAt is the time when this datastructure was creted.
 	CreatedAt time.Time
@@ -31,14 +31,14 @@ func (a *Autoupdater) httpListData() *httpListData {
 	a.queuesLock.Lock()
 	defer a.queuesLock.Unlock()
 
-	result.TriggerOnAutomerge = a.triggerOnAutomerge
+	result.TriggerOnAutomerge = a.TriggerOnAutomerge
 
-	for k := range a.triggerLabels {
+	for k := range a.TriggerLabels {
 		result.TriggerLabels = append(result.TriggerLabels, k)
 	}
 
-	for k := range a.monitoredRepos {
-		result.MonitoredRepositories = append(result.MonitoredRepositories, k.String())
+	for k := range a.MonitoredRepositories {
+		result.MonitoredRepositoriesitories = append(result.MonitoredRepositoriesitories, k.String())
 	}
 
 	result.PeriodicTriggerInterval = a.periodicTriggerIntv

@@ -19,6 +19,7 @@ import (
 	"github.com/simplesurance/directorius/internal/autoupdate/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goordinator"
+	"github.com/simplesurance/directorius/internal/set"
 
 	github_prov "github.com/simplesurance/directorius/internal/provider/github"
 )
@@ -211,6 +212,23 @@ func waitForActiveQueueLen(t *testing.T, q *queue, wantedLen int) {
 	)
 }
 
+func newAutoupdater(ghClient GithubClient,
+	ch chan *github_prov.Event,
+	repos []Repository,
+	triggerOnAutomerge bool,
+	triggerLabels []string,
+) *Autoupdater {
+	return NewAutoupdater(Config{
+		GitHubClient:          ghClient,
+		EventChan:             ch,
+		Retryer:               goordinator.NewRetryer(),
+		MonitoredRepositories: set.From(repos),
+		TriggerOnAutomerge:    triggerOnAutomerge,
+		TriggerLabels:         set.From(triggerLabels),
+		HeadLabel:             queueHeadLabel,
+	})
+}
+
 func TestEnqueueDequeue(t *testing.T) {
 	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
 
@@ -226,15 +244,12 @@ func TestEnqueueDequeue(t *testing.T) {
 	mockReadyForMergeStatus(ghClient, pr.Number, githubclt.ReviewDecisionApproved, githubclt.CIStatusPending).AnyTimes()
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, pr.Number).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		nil,
-		queueHeadLabel,
 	)
 
 	autoupdater.Start()
@@ -276,15 +291,12 @@ func TestPushToBaseBranchTriggersUpdate(t *testing.T) {
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).AnyTimes()
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		nil,
-		queueHeadLabel,
 	)
 
 	autoupdater.Start()
@@ -327,15 +339,12 @@ func TestPushToBaseBranchResumesPRs(t *testing.T) {
 
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 
 	autoupdater.Start()
@@ -381,15 +390,12 @@ func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(2)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 
 	autoupdater.Start()
@@ -440,15 +446,12 @@ func TestUnlabellingPRDequeuesPR(t *testing.T) {
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
@@ -495,15 +498,12 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 
 	autoupdater.Start()
@@ -631,15 +631,12 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 				Return(nil).
 				AnyTimes()
 
-			retryer := goordinator.NewRetryer()
-			autoupdater := NewAutoupdater(
+			autoupdater := newAutoupdater(
 				ghClient,
 				evChan,
-				retryer,
 				[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 				true,
 				nil,
-				queueHeadLabel,
 			)
 
 			autoupdater.Start()
@@ -787,15 +784,12 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 				Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID}, nil).
 				AnyTimes()
 
-			retryer := goordinator.NewRetryer()
-			autoupdater := NewAutoupdater(
+			autoupdater := newAutoupdater(
 				ghClient,
 				evChan,
-				retryer,
 				[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 				true,
 				nil,
-				queueHeadLabel,
 			)
 
 			autoupdater.Start()
@@ -859,15 +853,12 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).MinTimes(2)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 	autoupdater.periodicTriggerIntv = time.Second
 
@@ -954,15 +945,12 @@ func TestPRIsSuspendedWhenUptodateAndHasFailedStatus(t *testing.T) {
 				githubclt.ReviewDecisionApproved, githubclt.CIStatusFailure,
 			).AnyTimes()
 
-			retryer := goordinator.NewRetryer()
-			autoupdater := NewAutoupdater(
+			autoupdater := newAutoupdater(
 				ghClient,
 				evChan,
-				retryer,
 				[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 				true,
 				[]string{triggerLabel},
-				queueHeadLabel,
 			)
 
 			autoupdater.Start()
@@ -999,15 +987,12 @@ func TestEnqueueDequeueByAutomergeEvents(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		nil,
-		queueHeadLabel,
 	)
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -1102,15 +1087,12 @@ func TestInitialSync(t *testing.T) {
 		}).
 		Times(len(syncPRRequestsRet) + 1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{"queue-add"},
-		queueHeadLabel,
 	)
 
 	err := autoupdater.InitSync(context.Background())
@@ -1151,15 +1133,12 @@ func TestFirstPRInQueueIsUpdatedPeriodically(t *testing.T) {
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).AnyTimes()
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 
 	autoupdater.periodicTriggerIntv = 2 * time.Second
@@ -1200,15 +1179,12 @@ func TestReviewApprovedEventResumesSuspendedPR(t *testing.T) {
 
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 
 	autoupdater.Start()
@@ -1255,15 +1231,12 @@ func TestDismissingApprovalSuspendsActivePR(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 
 	autoupdater.Start()
@@ -1308,15 +1281,12 @@ func TestRequestingReviewChangesSuspendsPR(t *testing.T) {
 
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, true).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
@@ -1360,15 +1330,12 @@ func TestUpdatesAreResumeIfTestsFailAndBaseIsUpdated(t *testing.T) {
 	).Times(2)
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(0) // CI status is never pending
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
@@ -1426,15 +1393,12 @@ func TestBaseBranchUpdatesBlockUntilFinished(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		[]string{triggerLabel},
-		queueHeadLabel,
 	)
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -1478,15 +1442,12 @@ func TestPRHeadLabelIsAppliedToNextAfterMerge(t *testing.T) {
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr1Number).Times(1)
 
-	retryer := goordinator.NewRetryer()
-	autoupdater := NewAutoupdater(
+	autoupdater := newAutoupdater(
 		ghClient,
 		evChan,
-		retryer,
 		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
 		true,
 		nil,
-		queueHeadLabel,
 	)
 
 	autoupdater.Start()

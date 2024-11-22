@@ -15,6 +15,7 @@ import (
 	"github.com/simplesurance/directorius/internal/goordinator"
 	"github.com/simplesurance/directorius/internal/logfields"
 	"github.com/simplesurance/directorius/internal/provider/github"
+	"github.com/simplesurance/directorius/internal/set"
 
 	"github.com/spf13/pflag"
 	zaplogfmt "github.com/sykesm/zap-logfmt"
@@ -32,7 +33,7 @@ const (
 
 var logger *zap.Logger
 
-// Version is set via a ldflag on compilation
+// Version is set by goreleaser
 var Version = "version unknown"
 
 const EventChannelBufferSize = 1024
@@ -344,14 +345,16 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt
 	ch := make(chan *github.Event, EventChannelBufferSize)
 
 	autoupdater := autoupdate.NewAutoupdater(
-		githubClient,
-		ch,
-		goordinator.NewRetryer(),
-		repos,
-		config.TriggerOnAutoMerge,
-		config.TriggerOnLabels,
-		config.HeadLabel,
-		autoupdate.DryRun(*args.DryRun),
+		autoupdate.Config{
+			GitHubClient:          githubClient,
+			EventChan:             ch,
+			Retryer:               goordinator.NewRetryer(),
+			MonitoredRepositories: set.From(repos),
+			TriggerOnAutomerge:    config.TriggerOnAutoMerge,
+			TriggerLabels:         set.From(config.TriggerOnLabels),
+			HeadLabel:             config.HeadLabel,
+			DryRun:                *args.DryRun,
+		},
 	)
 	autoupdater.Start()
 
@@ -384,10 +387,7 @@ func main() {
 
 	mustInitLogger(config)
 
-	githubClient := githubclt.New(config.GithubAPIToken)
-
-	logger.Info(
-		"loaded cfg file",
+	logger.Info("loaded cfg file",
 		logfields.Event("cfg_loaded"),
 		zap.String("cfg_file", *args.ConfigFile),
 		zap.String("http_server_listen_addr", config.HTTPListenAddr),
@@ -406,7 +406,10 @@ func main() {
 		zap.String("ci.base_url", config.CI.BaseURL),
 		zap.String("ci.basic_auth.user", config.CI.BasicAuth.User),
 		zap.String("ci.basic_auth.password", hide(config.CI.BasicAuth.User)),
+		zap.Any("ci.job", config.CI.Jobs),
 	)
+
+	githubClient := githubclt.New(config.GithubAPIToken)
 
 	goodbye.Register(func(_ context.Context, sig os.Signal) {
 		logger.Info(fmt.Sprintf("terminating, received signal %s", sig.String()))

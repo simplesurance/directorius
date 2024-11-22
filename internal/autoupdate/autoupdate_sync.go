@@ -29,7 +29,7 @@ const (
 // If it meets a condition for not being autoupdated, it is dequeued.
 // If a PR has the [a.headLabel] set it is removed.
 func (a *Autoupdater) InitSync(ctx context.Context) error {
-	for repo := range a.monitoredRepos {
+	for repo := range a.MonitoredRepositories {
 		err := a.sync(ctx, repo.OwnerLogin, repo.RepositoryName)
 		if err != nil {
 			return fmt.Errorf("syncing %s failed: %w", repo, err)
@@ -42,7 +42,7 @@ func (a *Autoupdater) InitSync(ctx context.Context) error {
 func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 	stats := syncStat{StartTime: time.Now()}
 
-	logger := a.logger.With(
+	logger := a.Logger.With(
 		logfields.Repository(repo),
 		logfields.RepositoryOwner(owner),
 	)
@@ -66,12 +66,12 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 
 	// TODO: could we query less pull requests by ignoring PRs that are
 	// closed and were last changed before goordinator started?
-	it := a.ghClient.ListPullRequests(ctx, owner, repo, stateFilter, "asc", "created")
+	it := a.GitHubClient.ListPullRequests(ctx, owner, repo, stateFilter, "asc", "created")
 	for {
 		var pr *github.PullRequest
 
 		// TODO: use a lower timeout for the retries, otherwise we might get stuck here for too long on startup
-		err := a.retryer.Run(ctx, func(context.Context) error {
+		err := a.Retryer.Run(ctx, func(context.Context) error {
 			var err error
 			pr, err = it.Next()
 			return err
@@ -206,10 +206,10 @@ func (a *Autoupdater) removeLabel(ctx context.Context, repoOwner, repo string, g
 		return err
 	}
 
-	return a.retryer.Run(ctx, func(ctx context.Context) error {
-		return a.ghClient.RemoveLabel(ctx,
+	return a.Retryer.Run(ctx, func(ctx context.Context) error {
+		return a.GitHubClient.RemoveLabel(ctx,
 			repoOwner, repo, pr.Number,
-			a.headLabel,
+			a.HeadLabel,
 		)
 	}, append(pr.LogFields, logfields.Event("github_remove_label")))
 }
@@ -218,7 +218,7 @@ func (a *Autoupdater) evaluateActions(pr *github.PullRequest) []syncAction {
 	var result []syncAction
 
 	for _, label := range pr.Labels {
-		if label.GetName() == a.headLabel {
+		if label.GetName() == a.HeadLabel {
 			result = append(result, unlabel)
 		}
 	}
@@ -227,14 +227,14 @@ func (a *Autoupdater) evaluateActions(pr *github.PullRequest) []syncAction {
 		return append(result, dequeue)
 	}
 
-	if a.triggerOnAutomerge && pr.GetAutoMerge() != nil {
+	if a.TriggerOnAutomerge && pr.GetAutoMerge() != nil {
 		return append(result, enqueue)
 	}
 
-	if len(a.triggerLabels) != 0 {
+	if len(a.TriggerLabels) != 0 {
 		for _, label := range pr.Labels {
 			labelName := label.GetName()
-			if _, exist := a.triggerLabels[labelName]; exist {
+			if _, exist := a.TriggerLabels[labelName]; exist {
 				return append(result, enqueue)
 			}
 		}
