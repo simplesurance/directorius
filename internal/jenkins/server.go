@@ -3,11 +3,14 @@ package jenkins
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/simplesurance/directorius/internal/goorderr"
 )
 
 type basicAuth struct {
@@ -48,8 +51,44 @@ func (s *Server) Build(ctx context.Context, j *Job) error {
 	}
 
 	req.Header.Add("User-Agent", userAgent)
-	// TODO: add accept header
-	// TODO: set content-type
+	if req.Body != nil {
+		req.Header.Add("Content-Type", userAgent)
+	}
+
+	req.SetBasicAuth(s.auth.user, s.auth.password)
+
+	resp, err := s.clt.Do(req)
+	if err != nil {
+		return goorderr.NewRetryableAnytimeError(err)
+	}
+
+	defer resp.Body.Close()
+	if resp.ProtoMajor == 1 {
+		defer func() {
+			// try to drain body but limit it to a non-excessive amount
+			_, _ = io.CopyN(io.Discard, resp.Body, 1024)
+		}()
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		/* we simply almost always retry to make it resilient,
+		* requests can fail and succeed later e.g. on:
+		- 404 because the multibranch job was not created yet but is soonish,
+		- 502, 504 jenkins temporarily down,
+		- 401: temporary issues with jenkins auth backend,
+		etc
+		*/
+		return goorderr.NewRetryableAnytimeError(fmt.Errorf("server returned status code: %d", resp.StatusCode))
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return errors.New("server returned status code %d, expecting 201")
+	}
+
+	// Jenkins returns 201 and sends in the Location header the URL of the queued item,
+	// it's url can be used to get the build id, query the status, cancel it, etc
+	// location := resp.Header.Get("Location")
+
 	// s.clt.Do(req)
 	return nil
 }
