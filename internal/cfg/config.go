@@ -37,7 +37,7 @@ type GithubRepository struct {
 }
 
 type CI struct {
-	BaseURL   string    `toml:"base_url"`
+	ServerURL string    `toml:"server_url"`
 	BasicAuth BasicAuth `toml:"basic_auth"`
 	Jobs      []CIJob   `toml:"job"`
 }

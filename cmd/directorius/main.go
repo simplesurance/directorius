@@ -13,6 +13,7 @@ import (
 	"github.com/simplesurance/directorius/internal/cfg"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goordinator"
+	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/logfields"
 	"github.com/simplesurance/directorius/internal/provider/github"
 	"github.com/simplesurance/directorius/internal/set"
@@ -308,6 +309,33 @@ func normalizeHTTPEndpoint(endpoint string) string {
 	return endpoint
 }
 
+func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdate.CI {
+	if cfg == nil {
+		return nil
+	}
+
+	if len(cfg.Jobs) > 0 && cfg.ServerURL == "" {
+		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: ci.jobs are defined but ci.server_url is empty\n", *args.ConfigFile)
+		os.Exit(1)
+	}
+
+	if cfg.ServerURL != "" && len(cfg.Jobs) == 0 {
+		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: ci.server_url is defined but no ci.jobs are defined\n", *args.ConfigFile)
+		os.Exit(1)
+
+	}
+
+	var result autoupdate.CI
+	result.Server = jenkins.NewServer(cfg.ServerURL, cfg.BasicAuth.User, cfg.BasicAuth.Password)
+	for _, job := range cfg.Jobs {
+		result.Jobs = append(result.Jobs, &jenkins.JobTemplate{
+			RelURL:   job.Endpoint,
+			PostData: job.PostData,
+		})
+	}
+	return &result
+}
+
 func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt.Client, mux *http.ServeMux) (*autoupdate.Autoupdater, chan<- *github.Event) {
 	if !config.TriggerOnAutoMerge && len(config.TriggerOnLabels) == 0 {
 		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: trigger_on_auto_merge must be true or trigger_labels must be defined, both are empty in the configuration file\n", *args.ConfigFile)
@@ -354,6 +382,7 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt
 			TriggerLabels:         set.From(config.TriggerOnLabels),
 			HeadLabel:             config.HeadLabel,
 			DryRun:                *args.DryRun,
+			CI:                    mustConfigCItoAutoupdaterCI(&config.CI),
 		},
 	)
 	autoupdater.Start()
@@ -403,7 +432,7 @@ func main() {
 		zap.Strings("trigger_labels", config.TriggerOnLabels),
 		zap.Any("repositories", config.Repositories),
 		zap.String("webinterface_endpoint", config.WebInterfaceEndpoint),
-		zap.String("ci.base_url", config.CI.BaseURL),
+		zap.String("ci.base_url", config.CI.ServerURL),
 		zap.String("ci.basic_auth.user", config.CI.BasicAuth.User),
 		zap.String("ci.basic_auth.password", hide(config.CI.BasicAuth.User)),
 		zap.Any("ci.job", config.CI.Jobs),

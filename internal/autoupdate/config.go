@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"github.com/simplesurance/directorius/internal/jenkins"
 	github_prov "github.com/simplesurance/directorius/internal/provider/github"
 
 	"go.uber.org/zap"
@@ -12,6 +13,7 @@ type Config struct {
 	Logger *zap.Logger
 
 	GitHubClient          GithubClient
+	CI                    *CI
 	EventChan             <-chan *github_prov.Event
 	Retryer               Retryer
 	MonitoredRepositories map[Repository]struct{}
@@ -21,6 +23,11 @@ type Config struct {
 	// When DryRun is enabled all GitHub API operation that could result in
 	// a change will be simulated and always succeed.
 	DryRun bool
+}
+
+type CI struct {
+	Server *jenkins.Server
+	Jobs   []*jenkins.JobTemplate
 }
 
 func (cfg *Config) setDefaults() {
@@ -47,5 +54,11 @@ func (cfg *Config) mustValidate() {
 	}
 	if cfg.TriggerLabels == nil {
 		panic("autoupdater config: triggerlabels is nil")
+	}
+
+	if cfg.CI != nil {
+		if cfg.CI.Server == nil && len(cfg.CI.Jobs) > 0 {
+			panic("autoupdater config: ci jobs are defined but no server")
+		}
 	}
 }
