@@ -3,6 +3,7 @@ package autoupdate
 import (
 	"github.com/simplesurance/directorius/internal/jenkins"
 	github_prov "github.com/simplesurance/directorius/internal/provider/github"
+	"github.com/simplesurance/directorius/internal/set"
 
 	"go.uber.org/zap"
 )
@@ -18,7 +19,7 @@ type Config struct {
 	Retryer               Retryer
 	MonitoredRepositories map[Repository]struct{}
 	TriggerOnAutomerge    bool
-	TriggerLabels         map[string]struct{}
+	TriggerLabels         set.Set[string]
 	HeadLabel             string
 	// When DryRun is enabled all GitHub API operation that could result in
 	// a change will be simulated and always succeed.
@@ -33,6 +34,10 @@ type CI struct {
 func (cfg *Config) setDefaults() {
 	if cfg.Logger == nil {
 		cfg.Logger = zap.L().Named(loggerName)
+	}
+
+	if cfg.TriggerLabels == nil {
+		cfg.TriggerLabels = set.Set[string]{}
 	}
 }
 

@@ -369,7 +369,9 @@ func TestPushToBaseBranchResumesPRs(t *testing.T) {
 }
 
 func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
-	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t,
+		zaptest.Level(zapcore.DebugLevel),
+	).Named(t.Name()).WithOptions(zap.WithCaller(true))))
 
 	evChan := make(chan *github_prov.Event, 1)
 	defer close(evChan)

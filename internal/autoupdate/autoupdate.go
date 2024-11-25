@@ -49,8 +49,6 @@ type Autoupdater struct {
 	// updates for the first pull request in the queues periodically.
 	periodicTriggerIntv time.Duration
 
-	EventChan <-chan *github_prov.Event
-
 	// queues contains a queue for each base-branch for which pull requests
 	// are queued for autoupdates.
 	queues map[BranchID]*queue
@@ -103,6 +101,7 @@ func NewAutoupdater(cfg Config) *Autoupdater {
 	}
 
 	cfg.mustValidate()
+	fmt.Printf("TRIGGER LABELS %+v\n", a.TriggerLabels.Slice()) // FIXME
 
 	return &a
 }
@@ -396,7 +395,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			return
 		}
 
-		if _, exist := a.TriggerLabels[labelName]; !exist {
+		if !a.TriggerLabels.Contains(labelName) {
 			return
 		}
 
@@ -510,7 +509,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			return
 		}
 
-		if _, exist := a.TriggerLabels[labelName]; !exist {
+		if !a.TriggerLabels.Contains(labelName) {
 			return
 		}
 
