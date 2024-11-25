@@ -48,8 +48,8 @@ type BasicAuth struct {
 }
 
 type CIJob struct {
-	Endpoint string `toml:"endpoint"`
-	PostData string `toml:"post_data"`
+	Endpoint   string            `toml:"endpoint"`
+	Parameters map[string]string `toml:"parameters"`
 }
 
 func Load(reader io.Reader) (*Config, error) {

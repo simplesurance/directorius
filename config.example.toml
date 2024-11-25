@@ -56,6 +56,9 @@ queue_pr_head_label = "autoupdater-first"
 
   [[ci.job]]
     endpoint = "job/test/buildWithParameters"
-    post_data = "commit={{ .CommitID }}"
 
+    [ci.job.parameters]
+      commit = "{{ .CommitID }}"
+      branch = "{{ .Branch }}"
+      pr_nr = "{{ .PullRequestNr }}"
 

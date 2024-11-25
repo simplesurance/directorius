@@ -2,6 +2,7 @@ package jenkins
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"text/template"
@@ -14,8 +15,8 @@ var templateFuncs = template.FuncMap{
 
 // JobTemplate is a Job definition that can contain Go-Template statements.
 type JobTemplate struct {
-	RelURL   string
-	PostData string
+	RelURL     string
+	Parameters map[string]string
 }
 
 type templateData struct {
@@ -27,19 +28,11 @@ type templateData struct {
 // Template creates a concrete [Job] from j by templating it with
 // [templateData] and [templateFuncs.
 func (j *JobTemplate) Template(data templateData) (*Job, error) {
-	var postDataTemplated bytes.Buffer
 	var relURLTemplated bytes.Buffer
 
-	templ, err := template.New("job_templ").Funcs(templateFuncs).Parse(j.PostData)
-	if err != nil {
-		return nil, fmt.Errorf("parsing post_data as template failed: %w", err)
-	}
+	templ := template.New("job_templ").Funcs(templateFuncs).Option("missingkey=error")
 
-	if err := templ.Execute(&postDataTemplated, data); err != nil {
-		return nil, fmt.Errorf("templating post_data failed: %w", err)
-	}
-
-	templ, err = template.New("job_templ").Funcs(templateFuncs).Parse(j.RelURL)
+	templ, err := templ.Parse(j.RelURL)
 	if err != nil {
 		return nil, fmt.Errorf("parsing endpoint as template failed: %w", err)
 	}
@@ -48,8 +41,54 @@ func (j *JobTemplate) Template(data templateData) (*Job, error) {
 		return nil, fmt.Errorf("templating post_data failed: %w", err)
 	}
 
+	if len(j.Parameters) == 0 {
+		return &Job{
+			relURL: relURLTemplated.String(),
+		}, nil
+	}
+
+	templatedParams, err := j.templateParameters(data, templ)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonParams, err := json.Marshal(templatedParams)
+	if err != nil {
+		return nil, fmt.Errorf("converting templated job parameters to json failed: %w", err)
+	}
+
 	return &Job{
-		relURL:   relURLTemplated.String(),
-		postData: postDataTemplated.Bytes(),
+		relURL:         relURLTemplated.String(),
+		parametersJSON: jsonParams,
 	}, nil
+}
+
+func (j *JobTemplate) templateParameters(data templateData, templ *template.Template) (map[string]string, error) {
+	templatedParams := make(map[string]string, len(j.Parameters))
+
+	for k, v := range j.Parameters {
+		var bufK, bufV bytes.Buffer
+
+		templK, err := templ.Parse(k)
+		if err != nil {
+			return nil, fmt.Errorf("parsing parameter key %q as template failed: %w", k, err)
+		}
+
+		if err := templK.Execute(&bufK, data); err != nil {
+			return nil, fmt.Errorf("templating post_data failed: %w", err)
+		}
+
+		templV, err := templ.Parse(v)
+		if err != nil {
+			return nil, fmt.Errorf("parsing parameter value %q of key %q as template failed: %w", v, k, err)
+		}
+
+		if err := templV.Execute(&bufV, data); err != nil {
+			return nil, fmt.Errorf("templating post_data failed: %w", err)
+		}
+
+		templatedParams[bufK.String()] = bufV.String()
+	}
+
+	return templatedParams, nil
 }

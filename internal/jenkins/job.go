@@ -1,6 +1,6 @@
 package jenkins
 
 type Job struct {
-	relURL   string
-	postData []byte
+	relURL         string
+	parametersJSON []byte
 }
