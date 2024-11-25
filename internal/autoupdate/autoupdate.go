@@ -101,7 +101,6 @@ func NewAutoupdater(cfg Config) *Autoupdater {
 	}
 
 	cfg.mustValidate()
-	fmt.Printf("TRIGGER LABELS %+v\n", a.TriggerLabels.Slice()) // FIXME
 
 	return &a
 }
