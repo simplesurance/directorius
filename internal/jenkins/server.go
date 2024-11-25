@@ -10,7 +10,7 @@ type Server struct {
 	auth *basicAuth
 }
 
-func NewServer(url string, user, password string) *Server {
+func NewServer(url, user, password string) *Server {
 	return &Server{
 		url:  url,
 		auth: &basicAuth{user: user, password: password},
