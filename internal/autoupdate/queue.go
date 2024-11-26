@@ -120,21 +120,21 @@ func (q *queue) String() string {
 	return fmt.Sprintf("queue for base branch: %s", q.baseBranch.String())
 }
 
-type runningTask struct {
+type runningOperation struct {
 	pr         int
 	cancelFunc context.CancelFunc
 }
 
-func (q *queue) getExecuting() *runningTask {
+func (q *queue) getExecuting() *runningOperation {
 	v := q.executing.Load()
 	if v == nil {
 		return nil
 	}
 
-	return v.(*runningTask)
+	return v.(*runningOperation)
 }
 
-func (q *queue) setExecuting(v *runningTask) {
+func (q *queue) setExecuting(v *runningOperation) {
 	q.executing.Store(v)
 }
 
@@ -457,7 +457,7 @@ func (q *queue) scheduleUpdate(ctx context.Context, pr *PullRequest) {
 		ctx, cancelFunc := context.WithCancel(ctx)
 		defer cancelFunc()
 
-		q.setExecuting(&runningTask{pr: pr.Number, cancelFunc: cancelFunc})
+		q.setExecuting(&runningOperation{pr: pr.Number, cancelFunc: cancelFunc})
 		q.updatePR(ctx, pr)
 		q.setExecuting(nil)
 	})
@@ -1017,7 +1017,7 @@ func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRe
 		ctx, cancelFunc = context.WithTimeout(ctx, retryTimeout)
 		defer cancelFunc()
 
-		q.setExecuting(&runningTask{pr: pr.Number, cancelFunc: cancelFunc})
+		q.setExecuting(&runningOperation{pr: pr.Number, cancelFunc: cancelFunc})
 
 		err := q.resumeIfPRMergeStatusPositive(ctx, logger, pr)
 		if err != nil && !errors.Is(err, ErrNotFound) {
