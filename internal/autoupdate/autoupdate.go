@@ -259,7 +259,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processStatusEvent(ctx, logger, ev)
 
 	case *github.CheckRunEvent:
-		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepositories(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 				logEventEventIgnored,
