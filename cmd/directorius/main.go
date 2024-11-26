@@ -329,8 +329,8 @@ func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdate.CI {
 	result.Server = jenkins.NewServer(cfg.ServerURL, cfg.BasicAuth.User, cfg.BasicAuth.Password)
 	for _, job := range cfg.Jobs {
 		result.Jobs = append(result.Jobs, &jenkins.JobTemplate{
-			RelURL:   job.Endpoint,
-			PostData: job.PostData,
+			RelURL:     job.Endpoint,
+			Parameters: job.Parameters,
 		})
 	}
 	return &result

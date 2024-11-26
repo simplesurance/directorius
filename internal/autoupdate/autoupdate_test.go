@@ -497,7 +497,6 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).AnyTimes()
 
-	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 
 	autoupdater := newAutoupdater(
@@ -661,7 +660,6 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 
 			queueBaseBranch1 := autoupdater.getQueue(baseBranch1.BranchID)
 			require.NotNil(t, queueBaseBranch1)
-
 			waitForSuspendQueueLen(t, queueBaseBranch1, 2)
 			assert.Equal(t, 0, queueBaseBranch1.activeLen(), "active queue")
 			assert.Equal(t, 2, queueBaseBranch1.suspendedLen(), "suspend queue")

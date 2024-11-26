@@ -25,7 +25,7 @@ func TestUpdatePR_DoesNotCallBaseBranchUpdateIfPRIsNotApproved(t *testing.T) {
 
 	bb, err := NewBaseBranch(repoOwner, repo, "main")
 	require.NoError(t, err)
-	q := newQueue(bb, zap.L(), ghClient, goordinator.NewRetryer(), "first")
+	q := newQueue(bb, zap.L(), ghClient, goordinator.NewRetryer(), nil, "first")
 	t.Cleanup(q.Stop)
 
 	pr, err := NewPullRequest(1, "testbr", "fho", "test pr", "")
@@ -40,7 +40,7 @@ func TestUpdatePR_DoesNotCallBaseBranchUpdateIfPRIsNotApproved(t *testing.T) {
 	).AnyTimes()
 	ghClient.EXPECT().UpdateBranch(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
-	q.updatePR(context.Background(), pr)
+	q.updatePR(context.Background(), pr, TaskNone)
 }
 
 func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
@@ -65,7 +65,7 @@ func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
 
 	bb, err := NewBaseBranch(repoOwner, repo, "main")
 	require.NoError(t, err)
-	q := newQueue(bb, zap.L(), ghClient, goordinator.NewRetryer(), "first")
+	q := newQueue(bb, zap.L(), ghClient, goordinator.NewRetryer(), nil, "first")
 
 	pr, err := NewPullRequest(1, "pr_branch", "", "", "")
 	require.NoError(t, err)

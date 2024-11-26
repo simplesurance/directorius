@@ -95,6 +95,7 @@ func NewAutoupdater(cfg Config) *Autoupdater {
 	cfg.setDefaults()
 
 	if a.DryRun {
+		// FIXME: also use a dry runner for CI
 		// TODO: let the caller of the constructor provide the dry github client instead
 		a.GitHubClient = NewDryGithubClient(a.GitHubClient, a.Logger)
 		a.Logger.Info("dry run enabled")
@@ -120,8 +121,8 @@ func ghBranchesAsStrings(branches []*github.Branch) []string {
 	return result
 }
 
-// isMonitoredRepositories returns true if the repository is listed in the a.monitoredRepos.
-func (a *Autoupdater) isMonitoredRepositories(owner, repositoryName string) bool {
+// isMonitoredRepositoriesitory returns true if the repository is listed in the a.monitoredRepos.
+func (a *Autoupdater) isMonitoredRepositoriesitory(owner, repositoryName string) bool {
 	repo := Repository{
 		OwnerLogin:     owner,
 		RepositoryName: repositoryName,
@@ -155,7 +156,7 @@ func (a *Autoupdater) eventLoop() {
 		case <-periodicTrigger.C:
 			a.queuesLock.Lock()
 			for _, q := range a.queues {
-				q.ScheduleUpdate(context.Background())
+				q.ScheduleUpdate(context.Background(), TaskNone)
 				a.Logger.Debug("periodic run scheduled", q.baseBranch.Logfields...)
 			}
 			a.queuesLock.Unlock()
@@ -223,7 +224,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	switch ev := event.Event.(type) {
 	case *github.PullRequestEvent:
-		if !a.isMonitoredRepositories(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for unmonitored repository",
 				logEventEventIgnored,
@@ -235,7 +236,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processPullRequestEvent(ctx, logger, ev)
 
 	case *github.PushEvent:
-		if !a.isMonitoredRepositories(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 				logEventEventIgnored,
@@ -247,7 +248,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processPushEvent(ctx, logger, ev)
 
 	case *github.StatusEvent:
-		if !a.isMonitoredRepositories(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 				logEventEventIgnored,
@@ -259,7 +260,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processStatusEvent(ctx, logger, ev)
 
 	case *github.CheckRunEvent:
-		if !a.isMonitoredRepositories(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 				logEventEventIgnored,
@@ -270,7 +271,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processCheckRunEvent(ctx, logger, ev)
 
 	case *github.PullRequestReviewEvent:
-		if !a.isMonitoredRepositories(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 				logEventEventIgnored,
@@ -559,6 +560,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			return
 		}
 
+		// FIXME: we need to trigger CI Jobs after a synchronize event!
 		_, err = a.TriggerUpdateIfFirst(ctx, bb, &PRNumber{Number: prNumber})
 		if err == nil {
 			logger.Info(
@@ -675,17 +677,25 @@ func (a *Autoupdater) processPushEvent(ctx context.Context, logger *zap.Logger, 
 
 		return
 	}
-	if err := a.UpdateBranch(ctx, bb); err != nil {
-		if !errors.Is(err, ErrNotFound) {
-			logger.Error(
-				"triggering updates for pr failed",
-				zap.Error(err),
-				logEventEventIgnored,
-			)
+
+	a.queuesLock.Lock()
+	defer a.queuesLock.Unlock()
+
+	q, exist := a.queues[bb.BranchID]
+	if !exist {
+		logger.Error(
+			"triggering updates for pr failed",
+			zap.Error(err),
+			logEventEventIgnored,
+		)
+	}
+	q.ScheduleUpdate(ctx, TaskTriggerCI)
+
+	for bbID, q := range a.queues {
+		if bbID == bb.BranchID {
+			q.ResumeAll()
 		}
 	}
-
-	a.ResumeAllForBaseBranch(ctx, bb)
 }
 
 func (a *Autoupdater) processPullRequestReviewEvent(ctx context.Context, logger *zap.Logger, ev *github.PullRequestReviewEvent) {
@@ -946,6 +956,7 @@ func (a *Autoupdater) Enqueue(_ context.Context, baseBranch *BaseBranch, pr *Pul
 			a.Logger,
 			a.GitHubClient,
 			a.Retryer,
+			a.CI,
 			a.HeadLabel,
 		)
 
@@ -998,19 +1009,6 @@ func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 	}
 
 	return pr, nil
-}
-
-// ResumeAllForBaseBranch resumes updates for all Pull Requests that are based
-// on baseBranch and for which updates are currently suspended.
-func (a *Autoupdater) ResumeAllForBaseBranch(_ context.Context, baseBranch *BaseBranch) {
-	a.queuesLock.Lock()
-	defer a.queuesLock.Unlock()
-
-	for bbID, q := range a.queues {
-		if bbID == baseBranch.BranchID {
-			q.ResumeAll()
-		}
-	}
 }
 
 // SetPRStaleSinceIfNewerByBranch sets the staleSince timestamp of the PRs for
@@ -1092,23 +1090,6 @@ func (a *Autoupdater) Resume(_ context.Context, baseBranch *BaseBranch, prNumber
 	return q.Resume(prNumber)
 }
 
-// UpdateBranch triggers updating the first PR queued for updates for the given
-// baseBranch.
-//
-// See documentation on queue for more information.
-func (a *Autoupdater) UpdateBranch(ctx context.Context, baseBranch *BaseBranch) error {
-	a.queuesLock.Lock()
-	defer a.queuesLock.Unlock()
-
-	q, exist := a.queues[baseBranch.BranchID]
-	if !exist {
-		return ErrNotFound
-	}
-
-	q.ScheduleUpdate(ctx)
-	return nil
-}
-
 // ChangeBaseBranch dequeues a Pull Request from the queue oldBaseBranch and
 // enqueues it at the queue for newBaseBranch.
 func (a *Autoupdater) ChangeBaseBranch(
@@ -1167,13 +1148,13 @@ func (a *Autoupdater) _triggerUpdateIfFirst(
 	switch v := prSpec.(type) {
 	case *PRNumber:
 		if first.Number == v.Number {
-			q.ScheduleUpdate(ctx)
+			q.ScheduleUpdate(ctx, TaskNone)
 			return first, nil
 		}
 
 	case *PRBranch:
 		if first.Branch == v.BranchName {
-			q.ScheduleUpdate(ctx)
+			q.ScheduleUpdate(ctx, TaskNone)
 			return first, nil
 		}
 

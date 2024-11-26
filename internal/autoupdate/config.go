@@ -29,6 +29,9 @@ type Config struct {
 type CI struct {
 	Server *jenkins.Server
 	Jobs   []*jenkins.JobTemplate
+
+	retryer Retryer
+	logger  *zap.Logger
 }
 
 func (cfg *Config) setDefaults() {
@@ -38,6 +41,15 @@ func (cfg *Config) setDefaults() {
 
 	if cfg.TriggerLabels == nil {
 		cfg.TriggerLabels = set.Set[string]{}
+	}
+
+	if cfg.CI == nil {
+		cfg.CI = &CI{}
+	}
+
+	if cfg.CI != nil {
+		cfg.CI.retryer = cfg.Retryer
+		cfg.CI.logger = cfg.Logger
 	}
 }
 

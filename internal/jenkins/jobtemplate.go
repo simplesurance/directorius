@@ -19,15 +19,14 @@ type JobTemplate struct {
 	Parameters map[string]string
 }
 
-type templateData struct {
-	Commit            string
+type TemplateData struct {
 	PullRequestNumber string
 	Branch            string
 }
 
 // Template creates a concrete [Job] from j by templating it with
 // [templateData] and [templateFuncs.
-func (j *JobTemplate) Template(data templateData) (*Job, error) {
+func (j *JobTemplate) Template(data TemplateData) (*Job, error) {
 	var relURLTemplated bytes.Buffer
 
 	templ := template.New("job_templ").Funcs(templateFuncs).Option("missingkey=error")
@@ -63,7 +62,7 @@ func (j *JobTemplate) Template(data templateData) (*Job, error) {
 	}, nil
 }
 
-func (j *JobTemplate) templateParameters(data templateData, templ *template.Template) (map[string]string, error) {
+func (j *JobTemplate) templateParameters(data TemplateData, templ *template.Template) (map[string]string, error) {
 	templatedParams := make(map[string]string, len(j.Parameters))
 
 	for k, v := range j.Parameters {
