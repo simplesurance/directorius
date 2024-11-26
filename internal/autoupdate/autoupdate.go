@@ -120,8 +120,8 @@ func ghBranchesAsStrings(branches []*github.Branch) []string {
 	return result
 }
 
-// isMonitoredRepositoriesitory returns true if the repository is listed in the a.monitoredRepos.
-func (a *Autoupdater) isMonitoredRepositoriesitory(owner, repositoryName string) bool {
+// isMonitoredRepositories returns true if the repository is listed in the a.monitoredRepos.
+func (a *Autoupdater) isMonitoredRepositories(owner, repositoryName string) bool {
 	repo := Repository{
 		OwnerLogin:     owner,
 		RepositoryName: repositoryName,
