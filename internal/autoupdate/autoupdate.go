@@ -223,7 +223,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	switch ev := event.Event.(type) {
 	case *github.PullRequestEvent:
-		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepositories(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for unmonitored repository",
 				logEventEventIgnored,
