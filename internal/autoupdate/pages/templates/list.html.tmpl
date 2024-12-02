@@ -52,7 +52,7 @@
     </section>
 
     <header>
-      <h2>Queues</h3>
+      <h2>Queues</h2>
     </header>
     <div id="queue_content">
       {{ if not .Queues }}
@@ -63,7 +63,7 @@
       {{ range $queue := .Queues }}
         <section>
           <header>
-            <h3>Repository {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h2>
+            <h3>Repository {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h3>
           </header>
 
           {{ if or $queue.ActivePRs $queue.SuspendedPRs }}
