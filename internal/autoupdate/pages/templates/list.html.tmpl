@@ -43,7 +43,7 @@
                   Processed Events: {{ .ProcessedEvents }}
                 </li>
                 <li>
-                  Periodic check interval of first active PRs: {{ .PeriodicTriggerInterval }}
+                  Active PR Periodic Check Interval: {{ .PeriodicTriggerInterval }}
                 </li>
               </li>
             </ul>
@@ -63,7 +63,7 @@
       {{ range $queue := .Queues }}
         <section>
           <header>
-            <h3>Repository {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, BaseBranch: {{ $queue.BaseBranch }}</h2>
+            <h3>Repository {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h2>
           </header>
 
           {{ if or $queue.ActivePRs $queue.SuspendedPRs }}
