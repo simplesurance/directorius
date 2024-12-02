@@ -39,7 +39,7 @@ func NewHTTPService(autoupdater *Autoupdater) *HTTPService {
 				Funcs(templFuncs).
 				ParseFS(templFS, "pages/templates/*"),
 		),
-		logger: autoupdater.logger.Named("http_service"),
+		logger: autoupdater.Logger.Named("http_service"),
 	}
 }
 

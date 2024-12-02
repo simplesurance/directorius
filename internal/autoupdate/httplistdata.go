@@ -14,14 +14,16 @@ type httpListQueue struct {
 // httpListData is used as template data when rending the autoupdater list
 // page.
 type httpListData struct {
-	Queues                  []*httpListQueue
-	TriggerOnAutomerge      bool
-	TriggerLabels           []string
-	MonitoredRepositories   []string
-	PeriodicTriggerInterval time.Duration
-	ProcessedEvents         uint64
+	Queues                       []*httpListQueue
+	TriggerOnAutomerge           bool
+	TriggerLabels                []string
+	MonitoredRepositoriesitories []string
+	PeriodicTriggerInterval      time.Duration
+	ProcessedEvents              uint64
+	CIServer                     string
+	CIJobURLs                    []string
 
-	// CreatedAt is the time when this datastructure was creted.
+	// CreatedAt is the time when this datastructure was created.
 	CreatedAt time.Time
 }
 
@@ -31,18 +33,28 @@ func (a *Autoupdater) httpListData() *httpListData {
 	a.queuesLock.Lock()
 	defer a.queuesLock.Unlock()
 
-	result.TriggerOnAutomerge = a.triggerOnAutomerge
+	result.TriggerOnAutomerge = a.TriggerOnAutomerge
 
-	for k := range a.triggerLabels {
+	for k := range a.TriggerLabels {
 		result.TriggerLabels = append(result.TriggerLabels, k)
 	}
 
-	for k := range a.monitoredRepos {
-		result.MonitoredRepositories = append(result.MonitoredRepositories, k.String())
+	for k := range a.MonitoredRepositories {
+		result.MonitoredRepositoriesitories = append(result.MonitoredRepositoriesitories, k.String())
 	}
 
 	result.PeriodicTriggerInterval = a.periodicTriggerIntv
 	result.ProcessedEvents = a.processedEventCnt.Load()
+
+	if a.Config.CI == nil {
+		result.CIServer = "undefined"
+	} else {
+		result.CIServer = a.Config.CI.Client.String()
+	}
+
+	for _, j := range a.Config.CI.Jobs {
+		result.CIJobURLs = append(result.CIJobURLs, j.RelURL)
+	}
 
 	for baseBranch, queue := range a.queues {
 		queueData := httpListQueue{

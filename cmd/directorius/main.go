@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"time"
@@ -13,8 +14,10 @@ import (
 	"github.com/simplesurance/directorius/internal/cfg"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goordinator"
+	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/logfields"
 	"github.com/simplesurance/directorius/internal/provider/github"
+	"github.com/simplesurance/directorius/internal/set"
 
 	"github.com/spf13/pflag"
 	zaplogfmt "github.com/sykesm/zap-logfmt"
@@ -32,7 +35,7 @@ const (
 
 var logger *zap.Logger
 
-// Version is set via a ldflag on compilation
+// Version is set by goreleaser
 var Version = "version unknown"
 
 const EventChannelBufferSize = 1024
@@ -48,7 +51,7 @@ func exitOnErr(msg string, err error) {
 
 func panicHandler() {
 	if r := recover(); r != nil {
-		logger.Info(
+		logger.Error(
 			"panic caught, terminating gracefully",
 			zap.String("panic", fmt.Sprintf("%v", r)),
 			zap.StackSkip("stacktrace", 1),
@@ -283,6 +286,7 @@ func mustInitLogger(config *cfg.Config) {
 
 	logger = logger.Named("main")
 	zap.ReplaceGlobals(logger)
+	// TODO: call goodbye.Exit on Fatal and Panic calls (zap.WithFatalHook)
 
 	goodbye.Register(func(context.Context, os.Signal) {
 		if err := logger.Sync(); err != nil {
@@ -307,7 +311,86 @@ func normalizeHTTPEndpoint(endpoint string) string {
 	return endpoint
 }
 
-func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt.Client, mux *http.ServeMux) (*autoupdate.Autoupdater, chan<- *github.Event) {
+func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdate.CI {
+	if cfg == nil {
+		return nil
+	}
+
+	if len(cfg.Jobs) > 0 && cfg.ServerURL == "" {
+		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: ci.jobs are defined but ci.server_url is empty\n", *args.ConfigFile)
+		os.Exit(1)
+	}
+
+	if cfg.ServerURL != "" && len(cfg.Jobs) == 0 {
+		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: ci.server_url is defined but no ci.jobs are defined\n", *args.ConfigFile)
+		os.Exit(1)
+
+	}
+
+	var result autoupdate.CI
+	result.Client = jenkins.NewClient(cfg.ServerURL, cfg.BasicAuth.User, cfg.BasicAuth.Password)
+	for _, job := range cfg.Jobs {
+		result.Jobs = append(result.Jobs, &jenkins.JobTemplate{
+			RelURL:     job.Endpoint,
+			Parameters: job.Parameters,
+		})
+	}
+	return &result
+}
+
+func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, githubClient *githubclt.Client, mux *http.ServeMux) *autoupdate.Autoupdater {
+	repos := make([]autoupdate.Repository, 0, len(config.Repositories))
+	for _, r := range config.Repositories {
+		repos = append(repos, autoupdate.Repository{
+			OwnerLogin:     r.Owner,
+			RepositoryName: r.RepositoryName,
+		})
+	}
+
+	autoupdater := autoupdate.NewAutoupdater(
+		autoupdate.Config{
+			GitHubClient:          githubClient,
+			EventChan:             ch,
+			Retryer:               goordinator.NewRetryer(),
+			MonitoredRepositories: set.From(repos),
+			TriggerOnAutomerge:    config.TriggerOnAutoMerge,
+			TriggerLabels:         set.From(config.TriggerOnLabels),
+			HeadLabel:             config.HeadLabel,
+			DryRun:                *args.DryRun,
+			CI:                    mustConfigCItoAutoupdaterCI(&config.CI),
+		},
+	)
+
+	ctx, cancelFn := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancelFn()
+	if err := autoupdater.InitSync(ctx); err != nil {
+		logger.Error(
+			"autoupdater: initial synchronization failed",
+			logfields.Event("autoupdate_initial_sync_failed"),
+			zap.Error(err),
+		)
+	}
+
+	autoupdater.Start()
+
+	if config.WebInterfaceEndpoint != "" {
+		autoupdater.HTTPService().RegisterHandlers(mux, config.WebInterfaceEndpoint)
+		logger.Info(
+			"registered github pull request autoupdater http endpoint",
+			logfields.Event("autoupdater_http_handler_registered"),
+			zap.String("endpoint", config.WebInterfaceEndpoint),
+		)
+	}
+
+	return autoupdater
+}
+
+func mustValidateConfig(config *cfg.Config) {
+	if config.HTTPListenAddr == "" && config.HTTPSListenAddr == "" {
+		fmt.Fprintf(os.Stderr, "https_server_listen_addr or http_server_listen_addr must be defined in the config file, both are unset")
+		os.Exit(1)
+	}
+
 	if !config.TriggerOnAutoMerge && len(config.TriggerOnLabels) == 0 {
 		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: trigger_on_auto_merge must be true or trigger_labels must be defined, both are empty in the configuration file\n", *args.ConfigFile)
 		os.Exit(1)
@@ -330,47 +413,12 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, githubClient *githubclt
 
 	if len(config.Repositories) == 0 {
 		logger.Info("github pull request updater is disabled, autoupdater.repository config field is empty")
-		return nil, nil
 	}
-
-	repos := make([]autoupdate.Repository, 0, len(config.Repositories))
-	for _, r := range config.Repositories {
-		repos = append(repos, autoupdate.Repository{
-			OwnerLogin:     r.Owner,
-			RepositoryName: r.RepositoryName,
-		})
-	}
-
-	ch := make(chan *github.Event, EventChannelBufferSize)
-
-	autoupdater := autoupdate.NewAutoupdater(
-		githubClient,
-		ch,
-		goordinator.NewRetryer(),
-		repos,
-		config.TriggerOnAutoMerge,
-		config.TriggerOnLabels,
-		config.HeadLabel,
-		autoupdate.DryRun(*args.DryRun),
-	)
-	autoupdater.Start()
-
-	if config.WebInterfaceEndpoint != "" {
-		autoupdater.HTTPService().RegisterHandlers(mux, config.WebInterfaceEndpoint)
-		logger.Info(
-			"registered github pull request autoupdater http endpoint",
-			logfields.Event("autoupdater_http_handler_registered"),
-			zap.String("endpoint", config.WebInterfaceEndpoint),
-		)
-	}
-
-	return autoupdater, ch
 }
 
 func main() {
 	defer panicHandler()
 
-	defer goodbye.Exit(context.Background(), 1)
 	goodbye.Notify(context.Background())
 
 	mustParseCommandlineParams()
@@ -381,13 +429,11 @@ func main() {
 	}
 
 	config := mustParseCfg()
+	mustValidateConfig(config)
 
 	mustInitLogger(config)
 
-	githubClient := githubclt.New(config.GithubAPIToken)
-
-	logger.Info(
-		"loaded cfg file",
+	logger.Info("loaded cfg file",
 		logfields.Event("cfg_loaded"),
 		zap.String("cfg_file", *args.ConfigFile),
 		zap.String("http_server_listen_addr", config.HTTPListenAddr),
@@ -403,31 +449,25 @@ func main() {
 		zap.Strings("trigger_labels", config.TriggerOnLabels),
 		zap.Any("repositories", config.Repositories),
 		zap.String("webinterface_endpoint", config.WebInterfaceEndpoint),
+		zap.String("ci.base_url", config.CI.ServerURL),
+		zap.String("ci.basic_auth.user", config.CI.BasicAuth.User),
+		zap.String("ci.basic_auth.password", hide(config.CI.BasicAuth.User)),
+		zap.Any("ci.job", config.CI.Jobs),
 	)
 
-	goodbye.Register(func(_ context.Context, sig os.Signal) {
+	githubClient := githubclt.New(config.GithubAPIToken)
+
+	goodbye.RegisterWithPriority(func(_ context.Context, sig os.Signal) {
 		logger.Info(fmt.Sprintf("terminating, received signal %s", sig.String()))
-	})
-
-	if config.HTTPListenAddr == "" && config.HTTPSListenAddr == "" {
-		fmt.Fprintf(os.Stderr, "https_server_listen_addr or http_server_listen_addr must be defined in the config file, both are unset")
-		os.Exit(1)
-	}
-
-	var chans []chan<- *github.Event
+	}, math.MinInt)
 
 	mux := http.NewServeMux()
 
-	autoupdater, ch := mustStartPullRequestAutoupdater(config, githubClient, mux)
-	if ch != nil {
-		chans = append(chans, ch)
-	}
-
+	ch := make(chan *github.Event, EventChannelBufferSize)
 	gh := github.New(
-		chans,
+		[]chan<- *github.Event{ch},
 		github.WithPayloadSecret(config.GithubWebHookSecret),
 	)
-
 	mux.HandleFunc(config.HTTPGithubWebhookEndpoint, gh.HTTPHandler)
 	logger.Info(
 		"registered github webhook event http endpoint",
@@ -457,26 +497,13 @@ func main() {
 		)
 	}
 
-	goodbye.Register(func(context.Context, os.Signal) {
-		logger.Debug(
-			"stopping event loop",
-			logfields.Event("event_loop_stopping"),
-		)
-	})
+	autoupdater := mustStartPullRequestAutoupdater(config, ch, githubClient, mux)
 
-	if autoupdater != nil {
-		ctx, cancelFn := context.WithTimeout(context.Background(), 15*time.Minute)
-		if err := autoupdater.InitSync(ctx); err != nil {
-			logger.Error(
-				"autoupdater: initial synchronization failed",
-				logfields.Event("autoupdate_initial_sync_failed"),
-				zap.Error(err),
-			)
-		}
-		cancelFn()
+	waitForTermCh := make(chan struct{})
+	goodbye.RegisterWithPriority(func(context.Context, os.Signal) {
+		autoupdater.Stop()
+		close(waitForTermCh)
+	}, -1)
 
-		autoupdater.Start()
-	}
-
-	select {} // TODO: refactor this, allow clean shutdown
+	<-waitForTermCh
 }

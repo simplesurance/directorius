@@ -20,6 +20,7 @@ import (
 type MockPRIterator struct {
 	ctrl     *gomock.Controller
 	recorder *MockPRIteratorMockRecorder
+	isgomock struct{}
 }
 
 // MockPRIteratorMockRecorder is the mock recorder for MockPRIterator.

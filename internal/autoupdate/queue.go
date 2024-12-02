@@ -26,10 +26,14 @@ import (
 // queue it's state has not changed for longer then this timeout.
 const DefStaleTimeout = 3 * time.Hour
 
-// retryTimeout defines the maximum duration for which GitHub operation is
-// retried on a temporary error. The longer the duration is, the longer it
-// blocks the first element in the queue.
-const retryTimeout = 20 * time.Minute
+const (
+	// gitHubRetryTimeout defines the maximum duration for which GitHub operation is
+	// retried on a temporary error. The longer the duration is, the longer it
+	// blocks the first element in the queue.
+	gitHubRetryTimeout = 20 * time.Minute
+	// ciRetryTimeout defines for how long CI operations are retried
+	ciRetryTimeout = 10 * time.Minute
+)
 
 const updateBranchPollInterval = 2 * time.Second
 
@@ -85,9 +89,11 @@ type queue struct {
 	headLabel string
 
 	metrics *queueMetrics
+
+	ci *CI
 }
 
-func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retryer Retryer, headLabel string) *queue {
+func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retryer Retryer, ci *CI, headLabel string) *queue {
 	q := queue{
 		baseBranch:               *base,
 		active:                   orderedmap.New[int, *PullRequest](),
@@ -99,6 +105,7 @@ func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retry
 		staleTimeout:             DefStaleTimeout,
 		updateBranchPollInterval: updateBranchPollInterval,
 		headLabel:                headLabel,
+		ci:                       ci,
 	}
 
 	q.setLastRun(time.Time{})
@@ -120,21 +127,21 @@ func (q *queue) String() string {
 	return fmt.Sprintf("queue for base branch: %s", q.baseBranch.String())
 }
 
-type runningTask struct {
+type runningOperation struct {
 	pr         int
 	cancelFunc context.CancelFunc
 }
 
-func (q *queue) getExecuting() *runningTask {
+func (q *queue) getExecuting() *runningOperation {
 	v := q.executing.Load()
 	if v == nil {
 		return nil
 	}
 
-	return v.(*runningTask)
+	return v.(*runningOperation)
 }
 
-func (q *queue) setExecuting(v *runningTask) {
+func (q *queue) setExecuting(v *runningOperation) {
 	q.executing.Store(v)
 }
 
@@ -225,7 +232,7 @@ func (q *queue) _enqueueActive(pr *PullRequest) error {
 		logfields.Event("pull_request_enqueued"),
 	)
 
-	q.scheduleUpdate(context.Background(), pr)
+	q.scheduleUpdate(context.Background(), pr, TaskTriggerCI)
 
 	return nil
 }
@@ -324,8 +331,9 @@ func (q *queue) Dequeue(prNumber int) (*PullRequest, error) {
 		zap.Int("github.pull_request_new_first", newFirstElem.Number),
 	)
 
+	// TODO: do we really should add the head label here?
 	q.prAddQueueHeadLabel(context.Background(), newFirstElem)
-	q.scheduleUpdate(context.Background(), newFirstElem)
+	q.scheduleUpdate(context.Background(), newFirstElem, TaskNone)
 
 	return removed, nil
 }
@@ -370,7 +378,7 @@ func (q *queue) Suspend(prNumber int) error {
 		zap.Int("github.pull_request_new_first", newFirstElem.Number),
 	)
 
-	q.scheduleUpdate(context.Background(), newFirstElem)
+	q.scheduleUpdate(context.Background(), newFirstElem, TaskNone)
 
 	return nil
 }
@@ -442,23 +450,23 @@ func (q *queue) isFirstActive(pr *PullRequest) bool {
 }
 
 // ScheduleUpdate schedules updating the first pull request in the queue.
-func (q *queue) ScheduleUpdate(ctx context.Context) {
+func (q *queue) ScheduleUpdate(ctx context.Context, task Task) {
 	first := q.FirstActive()
 	if first == nil {
 		q.logger.Debug("ScheduleUpdateFirstPR was called but active queue is empty")
 		return
 	}
 
-	q.scheduleUpdate(ctx, first)
+	q.scheduleUpdate(ctx, first, task)
 }
 
-func (q *queue) scheduleUpdate(ctx context.Context, pr *PullRequest) {
+func (q *queue) scheduleUpdate(ctx context.Context, pr *PullRequest, task Task) {
 	q.actionPool.Queue(func() {
 		ctx, cancelFunc := context.WithCancel(ctx)
 		defer cancelFunc()
 
-		q.setExecuting(&runningTask{pr: pr.Number, cancelFunc: cancelFunc})
-		q.updatePR(ctx, pr)
+		q.setExecuting(&runningOperation{pr: pr.Number, cancelFunc: cancelFunc})
+		q.updatePR(ctx, pr, task)
 		q.setExecuting(nil)
 	})
 
@@ -478,14 +486,14 @@ func isPRIsClosedErr(err error) bool {
 	return strings.Contains(err.Error(), wantedErrStr)
 }
 
-// isPRStale returns true if the FirstElementSince timestamp is older then
+// isPRStale returns true if the [pr.GetStateUnchangedSince] timestamp is older then
 // q.staleTimeout.
 func (q *queue) isPRStale(pr *PullRequest) bool {
 	lastStatusChange := pr.GetStateUnchangedSince()
 
 	if lastStatusChange.IsZero() {
 		// This can be caused by a race when action() is running and
-		// the PR is dequeuend/suspended in the meantime.
+		// the PR is dequeued/suspended in the meantime.
 		q.logger.Debug("stateUnchangedSince timestamp of pr is zero", pr.LogFields...)
 		return false
 	}
@@ -494,7 +502,7 @@ func (q *queue) isPRStale(pr *PullRequest) bool {
 }
 
 // updatePR updates runs the update operation for the pull request.
-// If the ctx is cancelled or the pr is not the first one in the active queue
+// If the ctx is canceled or the pr is not the first one in the active queue
 // nothing is done.
 // If the base-branch contains changes that are not in the pull request branch,
 // updating it, by merging the base-branch into the PR branch, is schedule via
@@ -509,7 +517,7 @@ func (q *queue) isPRStale(pr *PullRequest) bool {
 // If the pull request was not updated, it's GitHub check status did not change
 // and it is the first element in the queue longer then q.staleTimeout it is
 // suspended.
-func (q *queue) updatePR(ctx context.Context, pr *PullRequest) {
+func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 	loggingFields := pr.LogFields
 	logger := q.logger.With(loggingFields...)
 
@@ -536,12 +544,12 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest) {
 		return
 	}
 
-	ctx, cancelFunc := context.WithTimeout(ctx, retryTimeout)
+	ghCtx, cancelFunc := context.WithTimeout(ctx, gitHubRetryTimeout)
 	defer cancelFunc()
 
 	defer q.incUpdateRuns()
 
-	status, err := q.prReadyForMergeStatus(ctx, pr)
+	status, err := q.prReadyForMergeStatus(ghCtx, pr)
 	if err != nil {
 		logger.Error(
 			"checking pr merge status failed",
@@ -574,11 +582,12 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest) {
 
 	logger.Debug("pr is approved")
 
-	branchChanged, updateHeadCommit, err := q.updatePRWithBase(ctx, pr, logger, loggingFields)
+	branchChanged, updateHeadCommit, err := q.updatePRWithBase(ghCtx, pr, logger, loggingFields)
 	if err != nil {
 		// error is logged in q.updatePRIfNeeded
 		return
 	}
+
 	if branchChanged {
 		logger.Info(
 			"branch updated with changes from base branch",
@@ -587,15 +596,10 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest) {
 		)
 
 		pr.SetStateUnchangedSinceIfNewer(time.Now())
-		// queue label is not added yet, the update of the branch will
-		// cause a PullRequest synchronize event, that will trigger
-		// another run of this function which will then add the label.
-		// This allows to only add the label if the up2date PR
-		// fullfills all other requirements, as being reviewed, not
-		// stale and don't have a failed CI check. Delaying adding the
-		// label prevents that in some situations the label is added
-		// only to be removed shortly after again because e.g. a CI
-		// check failed or an approval was removed
+		// queue label is not added neither CI jobs are trigger yet,
+		// the update of the branch will cause a PullRequest
+		// synchronize event, that will trigger
+		// another run of this function which will then trigger the CI jobs and add the label.
 		return
 	}
 
@@ -647,10 +651,27 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest) {
 
 	case githubclt.CIStatusPending:
 		q.prAddQueueHeadLabel(context.Background(), pr)
+
 		logger.Info(
 			"pull request is uptodate, approved and status checks are pending",
 			logfields.Event("pr_status_pending"),
 		)
+
+		if task == TaskTriggerCI {
+			ciCtx, cancelFunc := context.WithTimeout(ctx, ciRetryTimeout)
+			defer cancelFunc()
+			err := q.ci.RunAll(ciCtx, q.retryer, pr)
+			if err != nil {
+				logger.Error("triggering CI jobs failed",
+					logfields.Event("triggering_ci_job_failed"),
+					zap.Error(err),
+				)
+				return
+			}
+
+			logger.Info("ci jobs triggered", logfields.Event("ci_jobs_triggered"))
+			pr.SetStateUnchangedSinceIfNewer(time.Now())
+		}
 
 	case githubclt.CIStatusFailure:
 		if err := q.Suspend(pr.Number); err != nil {
@@ -694,7 +715,10 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest) {
 	}
 }
 
+// TODO: passing logger and loggingFields as parameters is redundant, only pass one of them
 func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *zap.Logger, loggingFields []zapcore.Field) (changed bool, headCommit string, updateBranchErr error) {
+	loggingFields = append(loggingFields, logfields.Event("update_branch"))
+
 	updateBranchErr = q.retryer.Run(ctx, func(ctx context.Context) error {
 		result, err := q.ghClient.UpdateBranch(
 			ctx,
@@ -813,7 +837,7 @@ func (q *queue) prReadyForMergeStatus(ctx context.Context, pr *PullRequest) (*gi
 
 	loggingFields := pr.LogFields
 
-	ctx, cancelFunc := context.WithTimeout(ctx, retryTimeout)
+	ctx, cancelFunc := context.WithTimeout(ctx, gitHubRetryTimeout)
 	defer cancelFunc()
 
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
@@ -858,7 +882,7 @@ func (q *queue) prsByBranch(branchNames set.Set[string]) (
 }
 
 func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
-	ctx, cancelFunc := context.WithTimeout(ctx, retryTimeout)
+	ctx, cancelFunc := context.WithTimeout(ctx, gitHubRetryTimeout)
 	defer cancelFunc()
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
 		// if the PR already has the label, it succeeds
@@ -887,7 +911,7 @@ func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
 }
 
 func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr *PullRequest) {
-	ctx, cancelFunc := context.WithTimeout(ctx, retryTimeout)
+	ctx, cancelFunc := context.WithTimeout(ctx, gitHubRetryTimeout)
 	defer cancelFunc()
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
 		return q.ghClient.RemoveLabel(ctx,
@@ -1014,10 +1038,10 @@ func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRe
 		ctx, cancelFunc := context.WithCancel(ctx)
 		defer cancelFunc()
 
-		ctx, cancelFunc = context.WithTimeout(ctx, retryTimeout)
+		ctx, cancelFunc = context.WithTimeout(ctx, gitHubRetryTimeout)
 		defer cancelFunc()
 
-		q.setExecuting(&runningTask{pr: pr.Number, cancelFunc: cancelFunc})
+		q.setExecuting(&runningOperation{pr: pr.Number, cancelFunc: cancelFunc})
 
 		err := q.resumeIfPRMergeStatusPositive(ctx, logger, pr)
 		if err != nil && !errors.Is(err, ErrNotFound) {

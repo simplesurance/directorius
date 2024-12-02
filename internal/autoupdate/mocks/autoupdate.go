@@ -22,6 +22,7 @@ import (
 type MockGithubClient struct {
 	ctrl     *gomock.Controller
 	recorder *MockGithubClientMockRecorder
+	isgomock struct{}
 }
 
 // MockGithubClientMockRecorder is the mock recorder for MockGithubClient.
@@ -131,6 +132,7 @@ func (mr *MockGithubClientMockRecorder) UpdateBranch(ctx, owner, repo, pullReque
 type MockRetryer struct {
 	ctrl     *gomock.Controller
 	recorder *MockRetryerMockRecorder
+	isgomock struct{}
 }
 
 // MockRetryerMockRecorder is the mock recorder for MockRetryer.

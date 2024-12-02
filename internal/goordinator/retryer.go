@@ -91,6 +91,10 @@ func (r *Retryer) Run(ctx context.Context, fn func(context.Context) error, logF 
 
 			err := fn(ctx)
 			if err != nil {
+				// TODO: use an interface for RetryableErrors,
+				// so every package can implement their own
+				// variation and does not have to import
+				// goorderr
 				var retryError *goorderr.RetryableError
 
 				if errors.As(err, &retryError) {

@@ -14,10 +14,10 @@
           <h2>Configuration</h2>
             <ul>
               <li>
-                Enqueue on Automerge: {{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}
+                <b>Enqueue on Automerge:</b> {{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}
               </li>
               <li>
-                Enqueue on PR Labels:
+                <b>Enqueue on PR Labels:</b>
                 {{ if .TriggerLabels }}
                 <ul>
                   {{ range .TriggerLabels }}
@@ -31,20 +31,35 @@
                 disabled
               {{ end }}
               <li>
-                Monitored Repositories:
+                <b>Monitored Repositories:</b>
                 <ul>
-                  {{ range .MonitoredRepositories }}
+                  {{ range .MonitoredRepositoriesitories }}
                     <li>
                       {{ . }}
                     </li>
                   {{ end }}
                 </ul>
                 <li>
-                  Processed Events: {{ .ProcessedEvents }}
+                  <b>Processed Events:</b> {{ .ProcessedEvents }}
                 </li>
                 <li>
-                  Active PR Periodic Check Interval: {{ .PeriodicTriggerInterval }}
+                  <b>Active PR Periodic Check Interval:</b> {{ .PeriodicTriggerInterval }}
                 </li>
+                <li>
+                  <b>CI Server:</b> {{ .CIServer }}
+                </li>
+                {{ if .CIJobURLs }}
+                <li>
+                  <b>CI Jobs:</b>
+                  <ul>
+                    {{ range .CIJobURLs }}
+                      <li>
+                        {{ . }}
+                      </li>
+                    {{ end }}
+                  </ul>
+                </li>
+                {{ end }}
               </li>
             </ul>
         </header>
@@ -118,17 +133,21 @@
         </header>
 
         <p>
-          The autoupdater keeps pull requests up to date with their base branch.
+          The autoupdater triggers CI jobs and keeps pull requests up to date
+          with their base branch.
         </p>
 
         <p>
-          A pull request is enqueued for autoupdates when auto_merge for the PR
+          A pull request is enqueued for autoupdates when auto-merge for the PR
           is enabled or it is marked with a configurable label.<br>
           The first pull request in each queue has the active status and is kept
-          up to date with its base-branch.
+          up to date with its base branch.
           If the base branch changes, the base branch is merged into the pull
           request branch.<br>
-          Other pull requests are enqueued for being kept uptodate.
+          Other pull requests are enqueued for being kept uptodate.<br>
+          When directorius has been configured to trigger CI job, they are run
+          when the branch of the first PR in the queue changes and when a PR is
+          is assigned the first place.<br>
         </p>
 
         <p>

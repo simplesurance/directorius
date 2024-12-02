@@ -1,7 +1,7 @@
-#http_server_listen_addr = ":8085"
-https_server_listen_addr = ":8084"
-https_ssl_cert_file = ""
-https_ssl_key_file = ""
+http_server_listen_addr = ":8085"
+#https_server_listen_addr = ":8084"
+#https_ssl_cert_file = ""
+#https_ssl_key_file = ""
 
 # the local http and https endpoints that receives github webhook events
 github_webhook_endpoint = "/listener/github"
@@ -22,7 +22,7 @@ log_format = "logfmt"
 log_time_key = "time_iso8601"
 
 # log_level controls the priority threshold for log messages.
-# All messages with the the specified or a higher priority are logged.
+# All messages with the specified or a higher priority are logged.
 # Supported values: debug, info, warn, error, panic, fatal
 log_level =  "info"
 
@@ -42,4 +42,22 @@ queue_pr_head_label = "autoupdater-first"
   # the GitHub login name of the subject owning the repository
   owner = "simplesurance"
   repository = "goordinator"
+
+[ci]
+  server_url = "https://jenkins"
+  basic_auth.user = "cetautomatix"
+  basic_auth.password = "hammer"
+
+  [[ci.job]]
+    endpoint = "job/check/{{ queryescape .Branch }}/build"
+
+  [[ci.job]]
+    endpoint = "job/build/{{ queryescape .PullRequestNr }}/build"
+
+  [[ci.job]]
+    endpoint = "job/test/buildWithParameters"
+
+    [ci.job.parameters]
+      branch = "{{ .Branch }}"
+      pr_nr = "{{ .PullRequestNr }}"
 

@@ -28,11 +28,28 @@ type Config struct {
 	TriggerOnLabels    []string           `toml:"trigger_labels"`
 	HeadLabel          string             `toml:"queue_pr_head_label"`
 	Repositories       []GithubRepository `toml:"repository"`
+	CI                 CI                 `toml:"ci"`
 }
 
 type GithubRepository struct {
 	Owner          string `toml:"owner"`
 	RepositoryName string `toml:"repository"`
+}
+
+type CI struct {
+	ServerURL string    `toml:"server_url"`
+	BasicAuth BasicAuth `toml:"basic_auth"`
+	Jobs      []CIJob   `toml:"job"`
+}
+
+type BasicAuth struct {
+	User     string `toml:"user"`
+	Password string `toml:"password"`
+}
+
+type CIJob struct {
+	Endpoint   string            `toml:"endpoint"`
+	Parameters map[string]string `toml:"parameters"`
 }
 
 func Load(reader io.Reader) (*Config, error) {
