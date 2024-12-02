@@ -7,65 +7,6 @@
     <h1>Autoupdater Overview</h1>
   </head>
 
-  <body>
-    <section>
-      <div id="configuration">
-        <header>
-          <h2>Configuration</h2>
-            <ul>
-              <li>
-                <b>Enqueue on Automerge:</b> {{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}
-              </li>
-              <li>
-                <b>Enqueue on PR Labels:</b>
-                {{ if .TriggerLabels }}
-                <ul>
-                  {{ range .TriggerLabels }}
-                    <li>
-                      {{ . }}
-                    </li>
-                  {{ end }}
-                </ul>
-              </li>
-              {{ else }}
-                disabled
-              {{ end }}
-              <li>
-                <b>Monitored Repositories:</b>
-                <ul>
-                  {{ range .MonitoredRepositoriesitories }}
-                    <li>
-                      {{ . }}
-                    </li>
-                  {{ end }}
-                </ul>
-                <li>
-                  <b>Processed Events:</b> {{ .ProcessedEvents }}
-                </li>
-                <li>
-                  <b>Active PR Periodic Check Interval:</b> {{ .PeriodicTriggerInterval }}
-                </li>
-                <li>
-                  <b>CI Server:</b> {{ .CIServer }}
-                </li>
-                {{ if .CIJobURLs }}
-                <li>
-                  <b>CI Jobs:</b>
-                  <ul>
-                    {{ range .CIJobURLs }}
-                      <li>
-                        {{ . }}
-                      </li>
-                    {{ end }}
-                  </ul>
-                </li>
-                {{ end }}
-              </li>
-            </ul>
-        </header>
-      </div>
-    </section>
-
     <header>
       <h2>Queues</h2>
     </header>
@@ -124,6 +65,66 @@
           </section>
         {{ end }}
       {{ end }}
+    </div>
+
+
+  <body>
+    <div id="configuration">
+      <section>
+        <header>
+          <h2>Configuration</h2>
+            <ul>
+              <li>
+                <b>Enqueue on Automerge:</b> {{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}
+              </li>
+              <li>
+                <b>Enqueue on PR Labels:</b>
+                {{ if .TriggerLabels }}
+                <ul>
+                  {{ range .TriggerLabels }}
+                    <li>
+                      {{ . }}
+                    </li>
+                  {{ end }}
+                </ul>
+              </li>
+              {{ else }}
+                disabled
+              {{ end }}
+              <li>
+                <b>Monitored Repositories:</b>
+                <ul>
+                  {{ range .MonitoredRepositoriesitories }}
+                    <li>
+                      {{ . }}
+                    </li>
+                  {{ end }}
+                </ul>
+                <li>
+                  <b>Processed Events:</b> {{ .ProcessedEvents }}
+                </li>
+                <li>
+                  <b>Active PR Periodic Check Interval:</b> {{ .PeriodicTriggerInterval }}
+                </li>
+                <li>
+                  <b>CI Server:</b> {{ .CIServer }}
+                </li>
+                {{ if .CIJobURLs }}
+                <li>
+                  <b>CI Jobs:</b>
+                  <ul>
+                    {{ range .CIJobURLs }}
+                      <li>
+                        {{ . }}
+                      </li>
+                    {{ end }}
+                  </ul>
+                </li>
+                {{ end }}
+              </li>
+            </ul>
+        </header>
+      </section>
     </div>
 
     <div id="explanation">
