@@ -682,10 +682,11 @@ func (a *Autoupdater) processPushEvent(ctx context.Context, logger *zap.Logger, 
 
 	q, exist := a.queues[bb.BranchID]
 	if !exist {
-		logger.Info(
-			"triggering updates for pr failed, queue for base branch does not exist",
+		logger.Debug(
+			"ignoring event, queue for base branch does not exist",
 			zap.Error(err),
 			logEventEventIgnored,
+			logfields.BaseBranch(bb.Branch),
 		)
 		return
 	}
