@@ -378,7 +378,7 @@ func (q *queue) Suspend(prNumber int) error {
 		zap.Int("github.pull_request_new_first", newFirstElem.Number),
 	)
 
-	q.scheduleUpdate(context.Background(), newFirstElem, TaskNone)
+	q.scheduleUpdate(context.Background(), newFirstElem, TaskTriggerCI)
 
 	return nil
 }
