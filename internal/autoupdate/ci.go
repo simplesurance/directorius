@@ -23,7 +23,7 @@ func (c *CI) RunAll(ctx context.Context, retryer Retryer, pr *PullRequest) error
 
 		logfields := append(
 			[]zap.Field{
-				logfields.Event("triggering_ci_job"),
+				logfields.Operation("triggering_ci_job"),
 				logfields.CIJob(job.String()),
 			},
 			pr.LogFields...,

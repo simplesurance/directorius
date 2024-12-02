@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -717,8 +718,6 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 // TODO: passing logger and loggingFields as parameters is redundant, only pass one of them
 func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *zap.Logger, loggingFields []zapcore.Field) (changed bool, headCommit string, updateBranchErr error) {
-	loggingFields = append(loggingFields, logfields.Event("update_branch"))
-
 	updateBranchErr = q.retryer.Run(ctx, func(ctx context.Context) error {
 		result, err := q.ghClient.UpdateBranch(
 			ctx,
@@ -747,7 +746,9 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 		headCommit = result.HeadCommitID
 
 		return nil
-	}, loggingFields)
+	},
+		append([]zapcore.Field{logfields.Operation("update_branch")}, loggingFields...),
+	)
 
 	if updateBranchErr != nil {
 		if isPRIsClosedErr(updateBranchErr) {
