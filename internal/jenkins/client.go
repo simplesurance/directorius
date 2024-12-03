@@ -2,7 +2,6 @@ package jenkins
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,13 +10,16 @@ import (
 	"time"
 
 	"github.com/simplesurance/directorius/internal/goorderr"
+
+	"go.uber.org/zap"
 )
 
 type Client struct {
 	url  string
 	auth *basicAuth
 
-	clt *http.Client
+	clt    *http.Client
+	logger *zap.Logger
 }
 
 type basicAuth struct {
@@ -32,9 +34,10 @@ const (
 
 func NewClient(url, user, password string) *Client {
 	return &Client{
-		url:  url,
-		auth: &basicAuth{user: user, password: password},
-		clt:  &http.Client{Timeout: requestTimeout},
+		url:    url,
+		auth:   &basicAuth{user: user, password: password},
+		clt:    &http.Client{Timeout: requestTimeout},
+		logger: zap.L().Named("jenkins_client"),
 	}
 }
 
@@ -71,7 +74,24 @@ func (s *Client) Build(ctx context.Context, j *Job) error {
 		}()
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	switch code := resp.StatusCode; {
+	case code == http.StatusCreated:
+		// Jenkins returns 201 and sends in the Location header the URL of the queued item,
+		// it's url can be used to get the build id, query the status, cancel it, etc
+		// location := resp.Header.Get("Location")
+		return nil
+	case code == http.StatusSeeOther, code == http.StatusFound:
+		// build already exists, probably happens when triggering a job
+		// with the same parameters then one in the wait-queue
+		return nil
+
+	case code >= 200 && code < 300:
+		s.logger.Debug("server returned unexpected status code, interpreting it as success",
+			zap.Int("http.status_code", resp.StatusCode),
+			zap.String("http.request_url", req.URL.Redacted()),
+		)
+		return nil
+	default:
 		/* we simply almost always retry to make it resilient,
 		* requests can fail and succeed later e.g. on:
 		- 404 because the multibranch job was not created yet but is soonish,
@@ -83,18 +103,8 @@ func (s *Client) Build(ctx context.Context, j *Job) error {
 		etc
 		*/
 		return goorderr.NewRetryableAnytimeError(fmt.Errorf("server returned status code: %d", resp.StatusCode))
+
 	}
-
-	if resp.StatusCode != http.StatusCreated {
-		return errors.New("server returned status code %d, expecting 201")
-	}
-
-	// Jenkins returns 201 and sends in the Location header the URL of the queued item,
-	// it's url can be used to get the build id, query the status, cancel it, etc
-	// location := resp.Header.Get("Location")
-
-	// s.clt.Do(req)
-	return nil
 }
 
 func toRequestBody(j *Job) io.Reader {
