@@ -1,13 +1,13 @@
 package jenkins
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/simplesurance/directorius/internal/goorderr"
@@ -50,10 +50,11 @@ func (s *Client) Build(ctx context.Context, j *Job) error {
 		return fmt.Errorf("creating http-request failed: %w", err)
 	}
 
-	req.Header.Add("User-Agent", userAgent)
 	if req.Body != nil {
-		req.Header.Add("Content-Type", userAgent)
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
+
+	req.Header.Add("User-Agent", userAgent)
 
 	req.SetBasicAuth(s.auth.user, s.auth.password)
 
@@ -76,6 +77,9 @@ func (s *Client) Build(ctx context.Context, j *Job) error {
 		- 404 because the multibranch job was not created yet but is soonish,
 		- 502, 504 jenkins temporarily down,
 		- 401: temporary issues with jenkins auth backend,
+		- 403: because of the bug that we encounter, probably related
+		       to github auth, where Jenkins from now and then fails with 403
+		       in the UI and APIs and then works after some retries
 		etc
 		*/
 		return goorderr.NewRetryableAnytimeError(fmt.Errorf("server returned status code: %d", resp.StatusCode))
@@ -98,7 +102,11 @@ func toRequestBody(j *Job) io.Reader {
 		return nil
 	}
 
-	return bytes.NewReader(j.parametersJSON)
+	formData := url.Values{
+		"json": []string{string(j.parametersJSON)},
+	}
+
+	return strings.NewReader(formData.Encode())
 }
 
 func (s *Client) String() string {

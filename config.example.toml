@@ -55,7 +55,7 @@ queue_pr_head_label = "autoupdater-first"
     endpoint = "job/build/{{ queryescape .PullRequestNr }}/build"
 
   [[ci.job]]
-    endpoint = "job/test/buildWithParameters"
+    endpoint = "job/test/build"
 
     [ci.job.parameters]
       branch = "{{ .Branch }}"

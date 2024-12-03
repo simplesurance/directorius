@@ -24,6 +24,17 @@ type TemplateData struct {
 	Branch            string
 }
 
+type jenkinsParameter struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// jenkinsParameters represent the data format that Jenkins expects for passing
+// parameters as JSON.
+type jenkinsParameters struct {
+	Parameter []*jenkinsParameter `json:"parameter"`
+}
+
 // Template creates a concrete [Job] from j by templating it with
 // [templateData] and [templateFuncs.
 func (j *JobTemplate) Template(data TemplateData) (*Job, error) {
@@ -46,14 +57,9 @@ func (j *JobTemplate) Template(data TemplateData) (*Job, error) {
 		}, nil
 	}
 
-	templatedParams, err := j.templateParameters(data, templ)
+	jsonParams, err := j.paramsToJSON(templ, data)
 	if err != nil {
 		return nil, err
-	}
-
-	jsonParams, err := json.Marshal(templatedParams)
-	if err != nil {
-		return nil, fmt.Errorf("converting templated job parameters to json failed: %w", err)
 	}
 
 	return &Job{
@@ -90,4 +96,25 @@ func (j *JobTemplate) templateParameters(data TemplateData, templ *template.Temp
 	}
 
 	return templatedParams, nil
+}
+
+func (j *JobTemplate) paramsToJSON(templ *template.Template, data TemplateData) ([]byte, error) {
+	var jenkinsParams jenkinsParameters
+
+	templatedParams, err := j.templateParameters(data, templ)
+	if err != nil {
+		return nil, err
+	}
+
+	jenkinsParams.Parameter = make([]*jenkinsParameter, 0, len(templatedParams))
+	for k, v := range templatedParams {
+		jenkinsParams.Parameter = append(jenkinsParams.Parameter, &jenkinsParameter{Name: k, Value: v})
+	}
+
+	jsonParams, err := json.Marshal(jenkinsParams)
+	if err != nil {
+		return nil, fmt.Errorf("converting parameter struct to json failed: %w", err)
+	}
+
+	return jsonParams, err
 }
