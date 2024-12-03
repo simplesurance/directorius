@@ -1651,3 +1651,29 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 		})
 	}
 }
+
+func TestPushEventForNotQueuedPR(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	evChan := make(chan *github_prov.Event, 1)
+	defer close(evChan)
+
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockCIClient(mockctrl)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+
+	autoupdater.Start()
+	t.Cleanup(autoupdater.Stop)
+
+	evChan <- &github_prov.Event{Event: newPushEvent("base_br")}
+	waitForProcessedEventCnt(t, autoupdater, 1)
+}
