@@ -568,7 +568,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				logFieldReason("branch_changed"),
 			)
 
-			// Resume not necessary, PR is alreay in the active
+			// Resume not necessary, PR is already in the active
 			// queue and the first element
 			return
 		}
