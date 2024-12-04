@@ -1,4 +1,5 @@
-BUILDFLAGS := -trimpath
+.PHONY: all
+all: build check test
 
 .PHONY: build
 build:
