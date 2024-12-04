@@ -18,8 +18,8 @@ import (
 
 	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
-	"github.com/simplesurance/directorius/internal/goordinator"
 	"github.com/simplesurance/directorius/internal/jenkins"
+	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
 
 	github_prov "github.com/simplesurance/directorius/internal/provider/github"
@@ -206,7 +206,7 @@ func newAutoupdater(
 	return NewAutoupdater(Config{
 		GitHubClient:          ghClient,
 		EventChan:             ch,
-		Retryer:               goordinator.NewRetryer(),
+		Retryer:               retry.NewRetryer(),
 		MonitoredRepositories: set.From(repos),
 		TriggerOnAutomerge:    triggerOnAutomerge,
 		TriggerLabels:         set.From(triggerLabels),

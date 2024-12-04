@@ -13,10 +13,10 @@ import (
 	"github.com/simplesurance/directorius/internal/autoupdater"
 	"github.com/simplesurance/directorius/internal/cfg"
 	"github.com/simplesurance/directorius/internal/githubclt"
-	"github.com/simplesurance/directorius/internal/goordinator"
 	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/logfields"
 	"github.com/simplesurance/directorius/internal/provider/github"
+	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
 
 	"github.com/spf13/pflag"
@@ -351,7 +351,7 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, 
 		autoupdater.Config{
 			GitHubClient:          githubClient,
 			EventChan:             ch,
-			Retryer:               goordinator.NewRetryer(),
+			Retryer:               retry.NewRetryer(),
 			MonitoredRepositories: set.From(repos),
 			TriggerOnAutomerge:    config.TriggerOnAutoMerge,
 			TriggerLabels:         set.From(config.TriggerOnLabels),

@@ -1,4 +1,4 @@
-package goordinator
+package retry
 
 import (
 	"context"

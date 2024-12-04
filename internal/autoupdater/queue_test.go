@@ -12,7 +12,7 @@ import (
 
 	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
-	"github.com/simplesurance/directorius/internal/goordinator"
+	"github.com/simplesurance/directorius/internal/retry"
 )
 
 func TestUpdatePR_DoesNotCallBaseBranchUpdateIfPRIsNotApproved(t *testing.T) {
@@ -25,7 +25,7 @@ func TestUpdatePR_DoesNotCallBaseBranchUpdateIfPRIsNotApproved(t *testing.T) {
 
 	bb, err := NewBaseBranch(repoOwner, repo, "main")
 	require.NoError(t, err)
-	q := newQueue(bb, zap.L(), ghClient, goordinator.NewRetryer(), nil, "first")
+	q := newQueue(bb, zap.L(), ghClient, retry.NewRetryer(), nil, "first")
 	t.Cleanup(q.Stop)
 
 	pr, err := NewPullRequest(1, "testbr", "fho", "test pr", "")
@@ -65,7 +65,7 @@ func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
 
 	bb, err := NewBaseBranch(repoOwner, repo, "main")
 	require.NoError(t, err)
-	q := newQueue(bb, zap.L(), ghClient, goordinator.NewRetryer(), nil, "first")
+	q := newQueue(bb, zap.L(), ghClient, retry.NewRetryer(), nil, "first")
 
 	pr, err := NewPullRequest(1, "pr_branch", "", "", "")
 	require.NoError(t, err)
