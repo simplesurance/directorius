@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/simplesurance/directorius/internal/autoupdate"
+	"github.com/simplesurance/directorius/internal/autoupdater"
 	"github.com/simplesurance/directorius/internal/cfg"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goordinator"
@@ -311,7 +311,7 @@ func normalizeHTTPEndpoint(endpoint string) string {
 	return endpoint
 }
 
-func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdate.CI {
+func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdater.CI {
 	if cfg == nil {
 		return nil
 	}
@@ -327,7 +327,7 @@ func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdate.CI {
 
 	}
 
-	var result autoupdate.CI
+	var result autoupdater.CI
 	result.Client = jenkins.NewClient(cfg.ServerURL, cfg.BasicAuth.User, cfg.BasicAuth.Password)
 	for _, job := range cfg.Jobs {
 		result.Jobs = append(result.Jobs, &jenkins.JobTemplate{
@@ -338,17 +338,17 @@ func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdate.CI {
 	return &result
 }
 
-func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, githubClient *githubclt.Client, mux *http.ServeMux) *autoupdate.Autoupdater {
-	repos := make([]autoupdate.Repository, 0, len(config.Repositories))
+func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, githubClient *githubclt.Client, mux *http.ServeMux) *autoupdater.Autoupdater {
+	repos := make([]autoupdater.Repository, 0, len(config.Repositories))
 	for _, r := range config.Repositories {
-		repos = append(repos, autoupdate.Repository{
+		repos = append(repos, autoupdater.Repository{
 			OwnerLogin:     r.Owner,
 			RepositoryName: r.RepositoryName,
 		})
 	}
 
-	autoupdater := autoupdate.NewAutoupdater(
-		autoupdate.Config{
+	autoupdater := autoupdater.NewAutoupdater(
+		autoupdater.Config{
 			GitHubClient:          githubClient,
 			EventChan:             ch,
 			Retryer:               goordinator.NewRetryer(),

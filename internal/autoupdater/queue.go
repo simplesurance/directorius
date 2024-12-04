@@ -1,4 +1,4 @@
-package autoupdate
+package autoupdater
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/simplesurance/directorius/internal/autoupdate/orderedmap"
-	"github.com/simplesurance/directorius/internal/autoupdate/routines"
+	"github.com/simplesurance/directorius/internal/autoupdater/orderedmap"
+	"github.com/simplesurance/directorius/internal/autoupdater/routines"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goorderr"
 	"github.com/simplesurance/directorius/internal/logfields"

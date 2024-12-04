@@ -1,4 +1,4 @@
-package autoupdate
+package autoupdater
 
 import (
 	"context"

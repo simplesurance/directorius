@@ -1,4 +1,4 @@
-package autoupdate
+package autoupdater
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 
-	"github.com/simplesurance/directorius/internal/autoupdate/mocks"
+	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goordinator"
 )

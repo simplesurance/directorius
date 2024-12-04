@@ -1,4 +1,4 @@
-package autoupdate
+package autoupdater
 
 type Task uint8
 
