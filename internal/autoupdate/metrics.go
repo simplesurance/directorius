@@ -10,7 +10,7 @@ import (
 	"github.com/simplesurance/directorius/internal/logfields"
 )
 
-const metricNamespace = "goordinator_autoupdater"
+const metricNamespace = "directorius"
 
 const (
 	queueOperationsMetricName = "queue_operations_total"
