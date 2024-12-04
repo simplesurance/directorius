@@ -1,8 +1,8 @@
 package jenkins
 
 type Job struct {
-	relURL         string
-	parametersJSON []byte
+	relURL     string
+	parameters map[string]string
 }
 
 func (j *Job) String() string {

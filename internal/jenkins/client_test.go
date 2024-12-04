@@ -2,7 +2,6 @@ package jenkins
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +19,7 @@ func TestRunJobWithParameters(t *testing.T) {
 		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
 		assert.Positive(t, r.ContentLength)
 
-		if !assert.Equal(t, "/build/mybranch", r.URL.Path) {
+		if !assert.Equal(t, "/job/mybranch/buildWithParameters", r.URL.Path) {
 			w.WriteHeader(http.StatusBadRequest)
 			return // required because we can't use require in go-routines
 		}
@@ -37,65 +36,31 @@ func TestRunJobWithParameters(t *testing.T) {
 			return
 		}
 
-		paramsJSON := urlVals.Get("json")
-		if !assert.NotEmpty(t, paramsJSON) {
+		if !assert.Len(t, urlVals, 2) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		var params jenkinsParameters
-
-		err = json.Unmarshal([]byte(paramsJSON), &params)
-		if !assert.NoError(t, err) {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if !assert.Len(t, params.Parameter, 2) {
+		v := urlVals.Get("version")
+		if !assert.Equal(t, "123", v) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		p1 := params.Parameter[0]
-		var pVerFound, pBranchFound bool
-		for _, p := range params.Parameter {
-			switch p.Name {
-			case "version":
-				if !assert.Equal(t, "123", p.Value) {
-					w.WriteHeader(http.StatusBadRequest)
-					return
-				}
-				pVerFound = true
-			case "branch":
-				if !assert.Equal(t, "mybranch", p.Value) {
-					w.WriteHeader(http.StatusBadRequest)
-					return
-				}
-				pBranchFound = true
-			default:
-				t.Error("unexpected parameter", p1.Name)
-				w.WriteHeader(http.StatusBadRequest)
-				return
-
-			}
-		}
-
-		if !assert.True(t, pVerFound) {
+		branch := urlVals.Get("branch")
+		if !assert.Equal(t, "mybranch", branch) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		if !assert.True(t, pBranchFound) {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
+		w.Header().Add("Location", "https://localhost/queue/item/123")
 		w.WriteHeader(http.StatusCreated)
 	}))
 	t.Cleanup(srv.Close)
 
 	clt := NewClient(srv.URL, "", "")
 	jt := JobTemplate{
-		RelURL:     "build/{{ .Branch }}",
+		RelURL:     "job/{{ .Branch }}",
 		Parameters: map[string]string{"version": "123", "branch": "{{ .Branch }}"},
 	}
 	job, err := jt.Template(TemplateData{PullRequestNumber: "123", Branch: "mybranch"})

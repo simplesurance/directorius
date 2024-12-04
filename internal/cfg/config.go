@@ -48,7 +48,7 @@ type BasicAuth struct {
 }
 
 type CIJob struct {
-	Endpoint   string            `toml:"endpoint"`
+	Job        string            `toml:"job"`
 	Parameters map[string]string `toml:"parameters"`
 }
 
