@@ -18,6 +18,7 @@ import (
 
 	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
+	gh_mocks "github.com/simplesurance/directorius/internal/githubclt/mocks"
 	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
@@ -992,7 +993,7 @@ func TestInitialSync(t *testing.T) {
 		Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID}, nil).
 		AnyTimes()
 
-	prIterNone := mocks.NewMockPRIterator(mockctrl)
+	prIterNone := gh_mocks.NewMockPRIterator(mockctrl)
 	ghClient.
 		EXPECT().
 		ListPullRequests(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any(), gomock.Any(), gomock.Any()).

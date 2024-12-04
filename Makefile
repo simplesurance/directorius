@@ -7,9 +7,9 @@ build:
 .PHONY: gen_mocks
 gen_mocks:
 	$(info * generating mock code)
-	mockgen -package mocks -source internal/autoupdate/autoupdate.go -destination internal/autoupdate/mocks/autoupdate.go
-	mockgen -package mocks -source internal/githubclt/client.go -destination internal/autoupdate/mocks/githubclient.go
-	mockgen -package mocks -destination internal/autoupdate/mocks/ciclient.go github.com/simplesurance/directorius/internal/autoupdate CIClient
+	mockgen -package mocks -source internal/autoupdater/autoupdate.go -destination internal/autoupdater/mocks/autoupdate.go
+	mockgen -package mocks -source internal/githubclt/client.go -destination internal/githubclt/mocks/githubclient.go
+	mockgen -package mocks -destination internal/autoupdater/mocks/ciclient.go github.com/simplesurance/directorius/internal/autoupdater CIClient
 
 .PHONY: check
 check:
