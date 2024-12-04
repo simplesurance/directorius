@@ -6,23 +6,31 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/simplesurance/directorius/internal/goorderr"
+
+	"go.uber.org/zap"
 )
 
-func (s *Client) Build(ctx context.Context, j *Job) error {
+// Build schedules a build of the job.
+// On success it returns the URL to the queued build item and nil.
+// The URL will [expire] 5 minutes after the item got a build number assigned.
+//
+// [expire]: https://web.archive.org/web/20241204165452/https://docs.cloudbees.com/docs/cloudbees-ci-kb/latest/client-and-managed-controllers/get-build-number-with-rest-api
+func (s *Client) Build(ctx context.Context, j *Job) (string, error) {
 	// https://wiki.jenkins-ci.org/display/JENKINS/Remote+access+API
 	// https://www.jenkins.io/doc/book/using/remote-access-api/
 
 	req, err := s.createRequest(ctx, j)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := s.clt.Do(req)
 	if err != nil {
-		return goorderr.NewRetryableAnytimeError(err)
+		return "", goorderr.NewRetryableAnytimeError(err)
 	}
 
 	defer resp.Body.Close()
@@ -44,10 +52,40 @@ func (s *Client) Build(ctx context.Context, j *Job) error {
 		       in the UI and APIs and then works after some retries
 		etc
 		*/
-		return goorderr.NewRetryableAnytimeError(fmt.Errorf("server returned status code: %d", resp.StatusCode))
+		return "", goorderr.NewRetryableAnytimeError(fmt.Errorf("server returned status code: %d", resp.StatusCode))
 	}
 
-	return nil
+	switch resp.StatusCode {
+	case http.StatusCreated:
+		// Jenkins returns 201 and sends in the Location header the URL of the queued item,
+		// it's url can be used to get the build id, query the status, cancel it, etc
+		// location := resp.Header.Get("Location")
+	case http.StatusSeeOther, http.StatusFound:
+		// build already exists, probably happens when triggering a job
+		// with the same parameters then one in the wait-queue
+	default:
+		s.logger.Debug("server returned unexpected status code, interpreting it as success",
+			zap.Int("http.status_code", resp.StatusCode),
+			zap.String("http.request_url", req.URL.Redacted()),
+		)
+	}
+
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return "", fmt.Errorf("server returned status code (%d) but the location header is missing", resp.StatusCode)
+	}
+	//  https://jenkins.localhost/queue/item/6482513/
+	locURL, err := url.Parse(location)
+	if err != nil {
+		return "", fmt.Errorf("server returned status code (%d) with a location header (%s) that can not be parsed as url: %w", resp.StatusCode, location, err)
+	}
+
+	const queueURLPathPrefix = "/queue/item"
+	if !strings.HasPrefix(locURL.Path, queueURLPathPrefix) {
+		return "", fmt.Errorf("server returned status code (%d) with a location header (%s) does not start with %s", resp.StatusCode, location, queueURLPathPrefix)
+	}
+
+	return locURL.String(), nil
 }
 
 func (s *Client) createRequest(ctx context.Context, j *Job) (*http.Request, error) {
