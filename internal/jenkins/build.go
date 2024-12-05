@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/simplesurance/directorius/internal/goorderr"
@@ -73,8 +74,8 @@ func (s *Client) Build(ctx context.Context, j *Job) (string, error) {
 	if location == "" {
 		return "", fmt.Errorf("server returned status code (%d) but the location header is missing", resp.StatusCode)
 	}
-	//  https://jenkins.sisu.sh/queue/item/6482513/
 	//  https://jenkins.localhost/queue/item/6482513/
+	locURL, err := url.Parse(location)
 	if err != nil {
 		return "", fmt.Errorf("server returned status code (%d) with a location header (%s) that can not be parsed as url: %w", resp.StatusCode, location, err)
 	}
