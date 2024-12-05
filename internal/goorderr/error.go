@@ -6,9 +6,10 @@ import (
 )
 
 type RetryableError struct {
-	// Err is the wrapped original error
+	// Err is the original error
 	Err error
-	// After is the earlierst point in time that the opertion can be retried
+	// After is the earliest point in time that the operation can be
+	// retried
 	After time.Time
 }
 
