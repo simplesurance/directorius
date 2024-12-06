@@ -2,44 +2,38 @@ package jenkins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/simplesurance/directorius/internal/goorderr"
-
-	"go.uber.org/zap"
+	"github.com/simplesurance/directorius/internal/logfields"
 )
 
 // Build schedules a build of the job.
-// On success it returns the URL to the queued build item and nil.
-// The URL will [expire] 5 minutes after the item got a build number assigned.
-//
-// [expire]: https://web.archive.org/web/20241204165452/https://docs.cloudbees.com/docs/cloudbees-ci-kb/latest/client-and-managed-controllers/get-build-number-with-rest-api
-func (s *Client) Build(ctx context.Context, j *Job) (string, error) {
+// On success it returns the ID of the queued build item and nil.
+// On errors where retrying might lead to positive result a
+// [goorderr.RetryableError] is returned.
+func (s *Client) Build(ctx context.Context, j *Job) (int64, error) {
 	// https://wiki.jenkins-ci.org/display/JENKINS/Remote+access+API
 	// https://www.jenkins.io/doc/book/using/remote-access-api/
 
-	req, err := s.createRequest(ctx, j)
+	req, err := s.newBuildRequest(ctx, j)
 	if err != nil {
-		return "", err
+		return -1, err
 	}
 
 	resp, err := s.clt.Do(req)
 	if err != nil {
-		return "", goorderr.NewRetryableAnytimeError(err)
+		return -1, goorderr.NewRetryableAnytimeError(err)
 	}
 
-	defer resp.Body.Close()
-	if resp.ProtoMajor == 1 {
-		defer func() {
-			// try to drain body but limit it to a non-excessive amount
-			_, _ = io.CopyN(io.Discard, resp.Body, 1024)
-		}()
-	}
+	defer drainCloseBody(resp)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		/* we simply almost always retry to make it resilient,
@@ -52,7 +46,7 @@ func (s *Client) Build(ctx context.Context, j *Job) (string, error) {
 		       in the UI and APIs and then works after some retries
 		etc
 		*/
-		return "", goorderr.NewRetryableAnytimeError(fmt.Errorf("server returned status code: %d", resp.StatusCode))
+		return -1, goorderr.NewRetryableAnytimeError(fmt.Errorf("server returned status code: %d", resp.StatusCode))
 	}
 
 	switch resp.StatusCode {
@@ -65,47 +59,56 @@ func (s *Client) Build(ctx context.Context, j *Job) (string, error) {
 		// with the same parameters then one in the wait-queue
 	default:
 		s.logger.Debug("server returned unexpected status code, interpreting it as success",
-			zap.Int("http.status_code", resp.StatusCode),
-			zap.String("http.request_url", req.URL.Redacted()),
+			logfields.HTTPResponseStatusCode(resp.StatusCode),
+			logfields.HTTPRequestURL(req.URL.Redacted()),
 		)
 	}
-
-	location := resp.Header.Get("Location")
-	if location == "" {
-		return "", fmt.Errorf("server returned status code (%d) but the location header is missing", resp.StatusCode)
+	id, err := queueItemIDFromLocationHeader(resp.Header)
+	if err != nil {
+		return -1, fmt.Errorf("extracting queue item id from location header of response with status code %d failed: %w", resp.StatusCode, err)
 	}
+
+	return id, nil
+}
+
+func queueItemIDFromLocationHeader(hdr http.Header) (int64, error) {
+	location := hdr.Get("Location")
+	if location == "" {
+		return -1, errors.New("location header is missing")
+	}
+
 	//  https://jenkins.localhost/queue/item/6482513/
 	locURL, err := url.Parse(location)
 	if err != nil {
-		return "", fmt.Errorf("server returned status code (%d) with a location header (%s) that can not be parsed as url: %w", resp.StatusCode, location, err)
+		return -1, fmt.Errorf("location header value (%s) can not be parsed as url: %w", location, err)
 	}
 
 	const queueURLPathPrefix = "/queue/item"
 	if !strings.HasPrefix(locURL.Path, queueURLPathPrefix) {
-		return "", fmt.Errorf("server returned status code (%d) with a location header (%s) does not start with %s", resp.StatusCode, location, queueURLPathPrefix)
+		return -1, fmt.Errorf("location header value (%s) does not start with %s", location, queueURLPathPrefix)
 	}
 
-	return locURL.String(), nil
+	itemIDStr := path.Base(locURL.Path)
+	itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+	if err != nil {
+		return -1, fmt.Errorf("converting last url path element (%s) to an integer item id failed: %w", itemIDStr, err)
+	}
+
+	return itemID, nil
 }
 
-func (s *Client) createRequest(ctx context.Context, j *Job) (*http.Request, error) {
+func (s *Client) newBuildRequest(ctx context.Context, j *Job) (*http.Request, error) {
 	hasParams := len(j.parameters) > 0
-	reqURL, err := url.JoinPath(s.url, j.relURL, getBuildEndpoint(hasParams))
-	if err != nil {
-		return nil, fmt.Errorf("concatening server (%q) with job (%q) url failed: %w", s.url, j.relURL, err)
-	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, toRequestBody(j))
+	reqURL := s.url.JoinPath(j.relURL, getBuildEndpoint(hasParams))
+	req, err := s.newRequest(ctx, http.MethodPost, reqURL.String(), toRequestBody(j))
 	if err != nil {
-		return nil, fmt.Errorf("creating http-request failed: %w", err)
+		return nil, err
 	}
 
 	if req.Body != nil {
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
-
-	req.Header.Add("User-Agent", userAgent)
-	req.SetBasicAuth(s.auth.user, s.auth.password)
 
 	return req, nil
 }

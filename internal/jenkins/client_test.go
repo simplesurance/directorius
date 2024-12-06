@@ -58,7 +58,8 @@ func TestRunJobWithParameters(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	clt := NewClient(srv.URL, "", "")
+	clt, err := NewClient(srv.URL, "", "")
+	require.NoError(t, err)
 	jt := JobTemplate{
 		RelURL:     "job/{{ .Branch }}",
 		Parameters: map[string]string{"version": "123", "branch": "{{ .Branch }}"},
@@ -66,8 +67,9 @@ func TestRunJobWithParameters(t *testing.T) {
 	job, err := jt.Template(TemplateData{PullRequestNumber: "123", Branch: "mybranch"})
 	require.NoError(t, err)
 
-	err = clt.Build(context.Background(), job)
+	itemID, err := clt.Build(context.Background(), job)
 	require.NoError(t, err)
+	assert.Equal(t, int64(123), itemID)
 
 	srv.Close()
 }
