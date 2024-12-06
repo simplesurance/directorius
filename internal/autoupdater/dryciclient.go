@@ -19,9 +19,9 @@ func NewDryCIClient(logger *zap.Logger) *DryCIClient {
 	}
 }
 
-func (c *DryCIClient) Build(_ context.Context, job *jenkins.Job) error {
+func (c *DryCIClient) Build(_ context.Context, job *jenkins.Job) (int64, error) {
 	c.logger.Info("simulated triggering of ci job", logfields.CIJob(job.String()))
-	return nil
+	return -1, nil
 }
 
 func (c *DryCIClient) String() string {

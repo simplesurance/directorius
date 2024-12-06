@@ -31,7 +31,7 @@ type Config struct {
 
 type CIClient interface {
 	fmt.Stringer
-	Build(context.Context, *jenkins.Job) error
+	Build(context.Context, *jenkins.Job) (int64, error)
 }
 
 type CI struct {

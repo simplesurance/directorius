@@ -34,7 +34,10 @@ func (c *CI) RunAll(ctx context.Context, retryer Retryer, pr *PullRequest) error
 
 		err = retryer.Run(
 			ctx,
-			func(ctx context.Context) error { return c.Client.Build(ctx, job) },
+			func(ctx context.Context) error {
+				_, err := c.Client.Build(ctx, job)
+				return err
+			},
 			logfields,
 		)
 		if err != nil {

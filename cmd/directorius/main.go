@@ -328,7 +328,12 @@ func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdater.CI {
 	}
 
 	var result autoupdater.CI
-	result.Client = jenkins.NewClient(cfg.ServerURL, cfg.BasicAuth.User, cfg.BasicAuth.Password)
+	var err error
+	result.Client, err = jenkins.NewClient(zap.L(), cfg.ServerURL, cfg.BasicAuth.User, cfg.BasicAuth.Password)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: ci.server_url is defined but no ci.jobs are defined\n", *args.ConfigFile)
+		os.Exit(1)
+	}
 	for _, job := range cfg.Jobs {
 		result.Jobs = append(result.Jobs, &jenkins.JobTemplate{
 			RelURL:     job.Job,

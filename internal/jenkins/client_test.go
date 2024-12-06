@@ -10,9 +10,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest"
 )
 
 func TestRunJobWithParameters(t *testing.T) {
+	logger := zaptest.NewLogger(t, zaptest.Level(zapcore.DebugLevel))
+	t.Cleanup(zap.ReplaceGlobals(logger))
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -58,7 +64,8 @@ func TestRunJobWithParameters(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	clt := NewClient(srv.URL, "", "")
+	clt, err := NewClient(logger, srv.URL, "", "")
+	require.NoError(t, err)
 	jt := JobTemplate{
 		RelURL:     "job/{{ .Branch }}",
 		Parameters: map[string]string{"version": "123", "branch": "{{ .Branch }}"},
@@ -66,8 +73,9 @@ func TestRunJobWithParameters(t *testing.T) {
 	job, err := jt.Template(TemplateData{PullRequestNumber: "123", Branch: "mybranch"})
 	require.NoError(t, err)
 
-	err = clt.Build(context.Background(), job)
+	itemID, err := clt.Build(context.Background(), job)
 	require.NoError(t, err)
+	assert.Equal(t, int64(123), itemID)
 
 	srv.Close()
 }
