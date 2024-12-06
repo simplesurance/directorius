@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/simplesurance/directorius/internal/goorderr"
 	"go.uber.org/zap"
@@ -29,7 +30,7 @@ var ErrBuildScheduled = errors.New("build scheduled, build not available yet")
 // return an error.
 //
 // [expires]: https://web.archive.org/web/20241204165452/https://docs.cloudbees.com/docs/cloudbees-ci-kb/latest/client-and-managed-controllers/get-build-number-with-rest-api
-func (s *Client) GetBuildURL(ctx context.Context, queueItemID string) (string, error) {
+func (s *Client) GetBuildURL(ctx context.Context, queueItemID int64) (string, error) {
 	var item queueItem
 
 	req, err := s.newGetBuildURLRequest(ctx, queueItemID)
@@ -37,13 +38,13 @@ func (s *Client) GetBuildURL(ctx context.Context, queueItemID string) (string, e
 		return "", err
 	}
 
-	resp, err := s.clt.Do(req)
+	resp, err := s.Do(req)
 	if err != nil {
 		return "", goorderr.NewRetryableAnytimeError(err)
 	}
 	defer drainCloseBody(resp)
 
-	if resp.StatusCode != http.StatusNotFound {
+	if resp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("server returned status code: %d", resp.StatusCode)
 	}
 
@@ -62,7 +63,7 @@ func (s *Client) GetBuildURL(ctx context.Context, queueItemID string) (string, e
 		return "", goorderr.NewRetryableAnytimeError(fmt.Errorf("reading response body failed, connection interrupted? %w", err))
 	}
 
-	s.logger.Info("received response", zap.ByteString("response", respBytes)) // FIXME remove
+	s.logger.Debug("received response", zap.ByteString("response", respBytes)) // FIXME remove
 
 	err = json.Unmarshal(respBytes, &item)
 	if err != nil {
@@ -92,9 +93,9 @@ func (s *Client) GetBuildURL(ctx context.Context, queueItemID string) (string, e
 	}
 }
 
-func (s *Client) newGetBuildURLRequest(ctx context.Context, queueItemID string) (*http.Request, error) {
-	reqURL := s.url.JoinPath("queue", "item", queueItemID)
-	queryParams := url.Values{}
+func (s *Client) newGetBuildURLRequest(ctx context.Context, queueItemID int64) (*http.Request, error) {
+	reqURL := s.url.JoinPath("queue", "item", strconv.FormatInt(queueItemID, 10), "api", "json")
+	queryParams := make(url.Values, 1)
 	queryParams.Add("tree", "cancelled,executable[url]")
 	reqURL.RawQuery = queryParams.Encode()
 

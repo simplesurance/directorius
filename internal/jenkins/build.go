@@ -28,7 +28,7 @@ func (s *Client) Build(ctx context.Context, j *Job) (int64, error) {
 		return -1, err
 	}
 
-	resp, err := s.clt.Do(req)
+	resp, err := s.Do(req)
 	if err != nil {
 		return -1, goorderr.NewRetryableAnytimeError(err)
 	}
@@ -101,6 +101,10 @@ func (s *Client) newBuildRequest(ctx context.Context, j *Job) (*http.Request, er
 	hasParams := len(j.parameters) > 0
 
 	reqURL := s.url.JoinPath(j.relURL, getBuildEndpoint(hasParams))
+	queryParams := make(url.Values, 1)
+	queryParams.Add("delay", "0sec")
+	reqURL.RawQuery = queryParams.Encode()
+
 	req, err := s.newRequest(ctx, http.MethodPost, reqURL.String(), toRequestBody(j))
 	if err != nil {
 		return nil, err
