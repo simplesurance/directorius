@@ -1,6 +1,8 @@
 package autoupdater
 
-import "time"
+import (
+	"time"
+)
 
 const allowRetriggerCIJobsOnSameCommitAfter = 10 * time.Minute
 

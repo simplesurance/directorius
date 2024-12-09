@@ -27,12 +27,12 @@ import (
 const DefStaleTimeout = 3 * time.Hour
 
 const (
-	// gitHubRetryTimeout defines the maximum duration for which GitHub operation is
-	// retried on a temporary error. The longer the duration is, the longer it
-	// blocks the first element in the queue.
-	gitHubRetryTimeout = 20 * time.Minute
-	// ciRetryTimeout defines for how long CI operations are retried
-	ciRetryTimeout = 10 * time.Minute
+	// operationTimeout defines the max duration for which individual
+	// GitHub and CI operation are retried on error
+	operationTimeout = 10 * time.Minute
+	// updatePRTimeout is the max. duration for which the [q.updatePR]
+	// method runs for a PR. It should be bigger than [operationTimeout].
+	updatePRTimeout = operationTimeout * 3
 )
 
 const updateBranchPollInterval = 2 * time.Second
@@ -544,12 +544,15 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		return
 	}
 
-	ghCtx, cancelFunc := context.WithTimeout(ctx, gitHubRetryTimeout)
-	defer cancelFunc()
+	ctx, cancelFn := context.WithCancel(ctx)
+	defer cancelFn()
+	// to be able to set individual timeouts for calls via the context,
+	// time.AfterFunc instead of context.WithTimeout is used
+	timer := time.AfterFunc(updatePRTimeout, cancelFn)
 
 	defer q.incUpdateRuns()
 
-	status, err := q.prReadyForMergeStatus(ghCtx, pr)
+	status, err := q.prReadyForMergeStatus(ctx, pr)
 	if err != nil {
 		logger.Error(
 			"checking pr merge status failed",
@@ -582,11 +585,13 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 	logger.Debug("pr is approved")
 
-	branchChanged, updateHeadCommit, err := q.updatePRWithBase(ghCtx, pr, logger, loggingFields)
+	branchChanged, updateHeadCommit, err := q.updatePRWithBase(ctx, pr, logger, loggingFields)
 	if err != nil {
 		// error is logged in q.updatePRIfNeeded
 		return
 	}
+
+	timer.Stop()
 
 	if branchChanged {
 		logger.Info(
@@ -650,7 +655,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		)
 
 	case githubclt.CIStatusPending:
-		q.prAddQueueHeadLabel(context.Background(), pr)
+		q.prAddQueueHeadLabel(ctx, pr)
 
 		logger.Info(
 			"pull request is uptodate, approved and status checks are pending",
@@ -676,9 +681,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 				return
 			}
 
-			ciCtx, cancelFunc := context.WithTimeout(ctx, ciRetryTimeout)
-			defer cancelFunc()
-			err := q.ci.RunAll(ciCtx, q.retryer, pr)
+			err := q.ci.RunAll(ctx, q.retryer, pr)
 			if err != nil {
 				logger.Error("triggering CI jobs failed",
 					logfields.Event("triggering_ci_jobs_failed"),
@@ -737,6 +740,9 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 // TODO: passing logger and loggingFields as parameters is redundant, only pass one of them
 func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *zap.Logger, loggingFields []zapcore.Field) (changed bool, headCommit string, updateBranchErr error) {
+	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
+	defer cancelFunc()
+
 	updateBranchErr = q.retryer.Run(ctx, func(ctx context.Context) error {
 		result, err := q.ghClient.UpdateBranch(
 			ctx,
@@ -805,7 +811,7 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 		}
 
 		// use a new context, otherwise it is forwarded for an
-		// action on another branch, and cancelling action for
+		// action on another branch, and canceling action for
 		// one branch, would cancel multiple others
 		if err := q.Suspend(pr.Number); err != nil {
 			logger.Error(
@@ -823,13 +829,13 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 			zap.Error(updateBranchErr),
 		)
 
-		// the current ctx got cancelled in q.Suspend(), use
+		// the current ctx got canceled in q.Suspend(), use
 		// another context to prevent that posting the comment
-		// gets cancelled, use a shorter timeout to prevent that this
-		// operations blocks the queue unnecessary long, use a  shorter
+		// gets canceled, use a shorter timeout to prevent that this
+		// operations blocks the queue unnecessary long, use a shorter
 		// timeout to prevent that this operations blocks the queue
 		// unnecessary long
-		ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancelFunc := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancelFunc()
 		err := q.ghClient.CreateIssueComment(
 			ctx,
@@ -857,7 +863,7 @@ func (q *queue) prReadyForMergeStatus(ctx context.Context, pr *PullRequest) (*gi
 
 	loggingFields := pr.LogFields
 
-	ctx, cancelFunc := context.WithTimeout(ctx, gitHubRetryTimeout)
+	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
 	defer cancelFunc()
 
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
@@ -902,7 +908,7 @@ func (q *queue) prsByBranch(branchNames set.Set[string]) (
 }
 
 func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
-	ctx, cancelFunc := context.WithTimeout(ctx, gitHubRetryTimeout)
+	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
 	defer cancelFunc()
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
 		// if the PR already has the label, it succeeds
@@ -931,7 +937,7 @@ func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
 }
 
 func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr *PullRequest) {
-	ctx, cancelFunc := context.WithTimeout(ctx, gitHubRetryTimeout)
+	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
 	defer cancelFunc()
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
 		return q.ghClient.RemoveLabel(ctx,
@@ -1050,7 +1056,7 @@ func (q *queue) resumeIfPRMergeStatusPositive(ctx context.Context, logger *zap.L
 
 // ScheduleResumePRIfStatusPositive schedules resuming autoupdates for a pull
 // request when it's approved and it's check and status state is success,
-// pending  or expected and it's review status is approved.
+// pending or expected and it's review status is approved.
 func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRequest) {
 	q.actionPool.Queue(func() {
 		logger := q.logger.With(pr.LogFields...)
@@ -1058,7 +1064,7 @@ func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRe
 		ctx, cancelFunc := context.WithCancel(ctx)
 		defer cancelFunc()
 
-		ctx, cancelFunc = context.WithTimeout(ctx, gitHubRetryTimeout)
+		ctx, cancelFunc = context.WithTimeout(ctx, operationTimeout)
 		defer cancelFunc()
 
 		q.setExecuting(&runningOperation{pr: pr.Number, cancelFunc: cancelFunc})
@@ -1076,7 +1082,7 @@ func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRe
 		Debug("checking PR status scheduled", logfields.Event("status_check_scheduled"))
 }
 
-// Stop clear alls queues and stops running tasks.
+// Stop clears all queues and stops running tasks.
 // The caller must ensure that nothing is added to the queue while Stop is running.
 func (q *queue) Stop() {
 	q.logger.Debug("terminating")
@@ -1123,8 +1129,8 @@ func (q *queue) SetPRStaleSinceIfNewerByBranch(branchNames []string, t time.Time
 }
 
 // SetPRStaleSinceIfNewer if a PullRequest with the given number exist
-// in the active queue or dequeued list, it's unchangedSince timestamp is set to
-// t, if it is newer.
+// in the active queue or dequeued list, it's unchangedSince timestamp is set
+// to t, if it is newer.
 // If it is older, nothing is done.
 // If a PR with the given number can not be found, ErrNotFound is returned.
 func (q *queue) SetPRStaleSinceIfNewer(prNumber int, t time.Time) error {

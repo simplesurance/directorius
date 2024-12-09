@@ -13,6 +13,9 @@ import (
 
 func (c *CI) RunAll(ctx context.Context, retryer Retryer, pr *PullRequest) error {
 	for _, jobTempl := range c.Jobs {
+		ctx, cancelFN := context.WithTimeout(ctx, operationTimeout)
+		defer cancelFN()
+
 		job, err := jobTempl.Template(jenkins.TemplateData{
 			PullRequestNumber: strconv.Itoa(pr.Number),
 			Branch:            pr.Branch,
@@ -39,6 +42,7 @@ func (c *CI) RunAll(ctx context.Context, retryer Retryer, pr *PullRequest) error
 		}
 
 		c.logger.Debug("triggered ci job", logfields...)
+		cancelFN()
 	}
 
 	return nil
