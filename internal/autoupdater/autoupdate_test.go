@@ -1678,3 +1678,76 @@ func TestPushEventForNotQueuedPR(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPushEvent("base_br")}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 }
+
+func TestFrequentCIJobRetriggeringIsPrevented(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+	evChan := make(chan *github_prov.Event, 1)
+	defer close(evChan)
+
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockCIClient(mockctrl)
+	prNumber := 1
+	prBranch := "pr_branch"
+	triggerLabel := "queue-add"
+
+	var readyForMergeCallCnt atomic.Uint32
+	ghClient.
+		EXPECT().
+		ReadyForMerge(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(prNumber)).
+		DoAndReturn(func(context.Context, string, string, int) (*githubclt.ReadyForMergeStatus, error) {
+			cnt := readyForMergeCallCnt.Add(1)
+			if cnt == uint32(2) || cnt == uint32(4) {
+				return &githubclt.ReadyForMergeStatus{
+					ReviewDecision: githubclt.ReviewDecisionApproved,
+					CIStatus:       githubclt.CIStatusFailure,
+					Commit:         headCommitID,
+				}, nil
+			}
+			return &githubclt.ReadyForMergeStatus{
+				ReviewDecision: githubclt.ReviewDecisionApproved,
+				CIStatus:       githubclt.CIStatusPending,
+				Commit:         headCommitID,
+			}, nil
+		}).MinTimes(3)
+
+	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).AnyTimes()
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		[]string{triggerLabel},
+	)
+	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: "here"}}
+
+	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
+	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(2)
+
+	ciClient.EXPECT().Build(gomock.Any(), gomock.Any()).Times(1)
+
+	autoupdater.Start()
+	t.Cleanup(autoupdater.Stop)
+
+	baseBranch := "main"
+	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
+	waitForProcessedEventCnt(t, autoupdater, 1)
+
+	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	require.NotNil(t, queue)
+	assert.Equal(t, 1, queue.activeLen())
+
+	assert.Equal(t, 1, queue.activeLen())
+	assert.Empty(t, queue.suspended)
+
+	evChan <- &github_prov.Event{Event: newStatusEvent("failure", prBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 2)
+	evChan <- &github_prov.Event{Event: newStatusEvent("pending", prBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 3)
+	evChan <- &github_prov.Event{Event: newStatusEvent("failure", prBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 4)
+	evChan <- &github_prov.Event{Event: newStatusEvent("pending", prBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 5)
+}
