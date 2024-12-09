@@ -663,16 +663,20 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		)
 
 		if task == TaskTriggerCI {
-			// cause resume->suspend loop: when for example
-			// causes that jobs are triggered again
-			// do not trigger CI jobs closely after each other
-			// github, the PR is resumed in the merge queue which
-			// multiple times in a row on the same commit, this can
-			// same commit, Jenkins reports an error to github,
-			// starts and a pending CI status is reported to
-			// the PR in the queue, when the newest triggered build
-			// triggering a CI job cancels a running job on the
-			// which results in a failed CI state and suspension of
+			// Prevent a loop where a PR transitions from #1 to
+			// being suspended non-stop. This can happen when a
+			// Jenkins job is configured to cancel previous builds
+			// and reports the status to GitHub.
+			// When the PR becomes #1 in the queue and CI jobs are
+			// already running, CI jobs are scheduled by
+			// directorius. This causes running CI builds to get
+			// canceled. A failure status is reported via github
+			// checks for the canceled builds. directorius suspends
+			// updates for the PR. When the new scheduled CI build
+			// starts, it reports a pending status to github
+			// checks. The PR becomes #1 in the queue again, CI
+			// jobs are triggered again and the loops starts from
+			// the beginning.
 			if pr.CITriggerStatus.CIJobsTriggeredRecently(status.Commit) {
 				logger.Info("skipping triggering ci jobs, builds have been triggered recently on same commit",
 					logfields.Event("triggering_ci_jobs_skipped"),
