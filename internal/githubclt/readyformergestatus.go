@@ -32,10 +32,11 @@ type CIJobStatus struct {
 	Name     string
 	Status   CIStatus
 	Required bool
+	JobURL   string
 }
 
 // ReadyForMergeStatus represent the information deciding if a pull request is
-// ready to be merged. It contains the review decision and  CI job results.
+// ready to be merged. It contains the review decision and CI job results.
 type ReadyForMergeStatus struct {
 	ReviewDecision ReviewDecision
 	CIStatus       CIStatus
@@ -118,6 +119,7 @@ func toCIJobStatuses(
 
 		if entry, exists := statusesByName[run.Name]; exists {
 			entry.Status = status
+			entry.JobURL = run.DetailsURL
 			continue
 		}
 
@@ -125,6 +127,7 @@ func toCIJobStatuses(
 			Name:     run.Name,
 			Status:   status,
 			Required: false,
+			JobURL:   run.DetailsURL,
 		}
 	}
 
@@ -136,6 +139,7 @@ func toCIJobStatuses(
 		}
 		if entry, exists := statusesByName[commitStatus.Context]; exists {
 			entry.Status = status
+			entry.JobURL = commitStatus.TargetURL
 			continue
 		}
 
@@ -143,6 +147,7 @@ func toCIJobStatuses(
 			Name:     commitStatus.Context,
 			Status:   status,
 			Required: false,
+			JobURL:   commitStatus.TargetURL,
 		}
 	}
 
@@ -196,11 +201,13 @@ type queryCheckStatus struct {
 	Name       string
 	Conclusion githubv4.CheckConclusionState
 	Status     githubv4.CheckStatusState
+	DetailsURL string `graphql:"detailsUrl"`
 }
 
 type queryStatusContext struct {
-	State   githubv4.StatusState
-	Context string
+	State     githubv4.StatusState
+	Context   string
+	TargetURL string `graphql:"targetUrl"`
 }
 
 type queryCIStatusResult struct {
