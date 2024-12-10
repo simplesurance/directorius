@@ -680,7 +680,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 			if pr.CITriggerStatus.CIJobsTriggeredRecently(status.Commit) {
 				logger.Info("skipping triggering ci jobs, builds have been triggered recently on same commit",
 					logfields.Event("triggering_ci_jobs_skipped"),
-					zap.Time("ci.last_triggered_at", pr.CITriggerStatus.lastRunAt),
+					zap.Time("ci.last_triggered_at", pr.CITriggerStatus.At),
 				)
 				return
 			}
@@ -693,8 +693,8 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 				)
 				return
 			}
-			pr.CITriggerStatus.lastRunCommit = status.Commit
-			pr.CITriggerStatus.lastRunAt = time.Now()
+			pr.CITriggerStatus.Commit = status.Commit
+			pr.CITriggerStatus.At = time.Now()
 
 			logger.Info("ci jobs triggered", logfields.Event("ci_jobs_triggered"))
 			pr.SetStateUnchangedSinceIfNewer(time.Now())

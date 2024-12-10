@@ -22,7 +22,7 @@ type PullRequest struct {
 	LogFields []zap.Field
 
 	EnqueuedSince   time.Time
-	CITriggerStatus CIJobTriggerStatus
+	CITriggerStatus CILastRun
 
 	stateUnchangedSince time.Time
 	lock                sync.Mutex // must be held when accessing stateUnchangedSince

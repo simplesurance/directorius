@@ -6,11 +6,11 @@ import (
 
 const allowRetriggerCIJobsOnSameCommitAfter = 10 * time.Minute
 
-type CIJobTriggerStatus struct {
-	lastRunAt     time.Time
-	lastRunCommit string
+type CILastRun struct {
+	At     time.Time
+	Commit string
 }
 
-func (s *CIJobTriggerStatus) CIJobsTriggeredRecently(commit string) bool {
-	return s.lastRunCommit == commit && time.Since(s.lastRunAt) <= allowRetriggerCIJobsOnSameCommitAfter
+func (s *CILastRun) CIJobsTriggeredRecently(commit string) bool {
+	return s.Commit == commit && time.Since(s.At) <= allowRetriggerCIJobsOnSameCommitAfter
 }
