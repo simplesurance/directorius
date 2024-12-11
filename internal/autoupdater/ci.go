@@ -2,8 +2,10 @@ package autoupdater
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/logfields"
@@ -11,42 +13,107 @@ import (
 	"go.uber.org/zap"
 )
 
+// RunAll starts builds of all [c.Jobs] and retrieves their URLs.
+// [pr.LastStartedCIBuilds] is overwritten with the URLs of all started builds.
 func (c *CI) RunAll(ctx context.Context, retryer Retryer, pr *PullRequest) error {
+	var errs []error
+	ch := make(chan *runCiResult, len(c.Jobs))
+
 	for _, jobTempl := range c.Jobs {
-		ctx, cancelFN := context.WithTimeout(ctx, operationTimeout)
-		defer cancelFN()
+		go c.runCIJobToCh(ctx, ch, retryer, pr, jobTempl)
+	}
 
-		job, err := jobTempl.Template(jenkins.TemplateData{
-			PullRequestNumber: strconv.Itoa(pr.Number),
-			Branch:            pr.Branch,
-		})
-		if err != nil {
-			return fmt.Errorf("templating jenkins job %q failed: %w", jobTempl.RelURL, err)
+	clear(pr.LastStartedCIBuilds)
+
+	for range len(c.Jobs) {
+		result := <-ch
+		if result.Err != nil {
+			errs = append(errs, result.Err)
+			continue
 		}
+		pr.LastStartedCIBuilds[result.Build.JobName] = result.Build
+	}
 
-		logfields := append(
-			[]zap.Field{
-				logfields.Operation("triggering_ci_job"),
-				logfields.CIJob(job.String()),
-			},
-			pr.LogFields...,
-		)
-
-		err = retryer.Run(
-			ctx,
-			func(ctx context.Context) error {
-				_, err := c.Client.Build(ctx, job)
-				return err
-			},
-			logfields,
-		)
-		if err != nil {
-			return fmt.Errorf("running ci job %q failed: %w", job, err)
-		}
-
-		c.logger.Debug("triggered ci job", logfields...)
-		cancelFN()
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 
 	return nil
+}
+
+type runCiResult struct {
+	Err   error
+	Build *jenkins.Build
+}
+
+// runCIJobToCh runs [CI.runCIJob] and sends the result to resultCh
+func (c *CI) runCIJobToCh(ctx context.Context, resultCh chan<- *runCiResult, retryer Retryer, pr *PullRequest, jobTempl *jenkins.JobTemplate) {
+	build, err := c.runCIJob(ctx, retryer, pr, jobTempl)
+	if err != nil {
+		err = fmt.Errorf("%s: %w", jobTempl.RelURL, err)
+	}
+
+	resultCh <- &runCiResult{
+		Err:   err,
+		Build: build,
+	}
+}
+
+func (c *CI) runCIJob(ctx context.Context, retryer Retryer, pr *PullRequest, jobTempl *jenkins.JobTemplate) (*jenkins.Build, error) {
+	var queuedBuildItemID int64
+	var build *jenkins.Build
+
+	ctx, cancelFN := context.WithCancel(ctx)
+	defer cancelFN()
+
+	timer := time.AfterFunc(operationTimeout, cancelFN)
+
+	job, err := jobTempl.Template(jenkins.TemplateData{
+		PullRequestNumber: strconv.Itoa(pr.Number),
+		Branch:            pr.Branch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("templating jenkins job failed: %w", err)
+	}
+
+	lf := logfields.NewWith(pr.LogFields, logfields.CIJob(job.String()))
+
+	err = retryer.Run(
+		ctx,
+		func(ctx context.Context) (err error) {
+			queuedBuildItemID, err = c.Client.Build(ctx, job)
+			return err
+		},
+		logfields.NewWith(lf, logfields.Operation("ci.run_job")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("triggering ci build via url %q failed: %w", job, err)
+	}
+
+	timer.Stop()
+
+	c.logger.Debug("triggered ci job",
+		logfields.NewWith(lf, zap.Int64("ci.queued_item.id", queuedBuildItemID))...,
+	)
+
+	timer = time.AfterFunc(operationTimeout, cancelFN)
+	err = retryer.Run(
+		ctx,
+		func(ctx context.Context) (err error) {
+			build, err = c.Client.GetBuildFromQueueItemID(ctx, queuedBuildItemID)
+			return err
+		},
+		logfields.NewWith(lf, logfields.Operation("ci.get_build_url")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("retrieving build information for queue item id %d failed: %w", queuedBuildItemID, err)
+	}
+
+	timer.Stop()
+
+	c.logger.Debug("retrieved url of queued ci build",
+		logfields.NewWith(lf, zap.Stringer("ci.build", build))...,
+	)
+
+	return build, nil
 }

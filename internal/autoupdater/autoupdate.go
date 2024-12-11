@@ -55,9 +55,9 @@ type Autoupdater struct {
 	// queuesLock must be hold when accessing queues
 	queuesLock sync.Mutex
 
-	// wg is a waitgroup for the event-loop go-routine.
+	// wg is a waitgroup for the event loop go-routine.
 	wg sync.WaitGroup
-	// shutdownChan can be closed to communicate to the event-loop go-routine to terminate.
+	// shutdownChan can be closed to communicate to the event loop go-routine to terminate.
 	shutdownChan chan struct{}
 
 	// processedEventCnt counts the number of events that were processed.
@@ -1201,8 +1201,8 @@ func (a *Autoupdater) TriggerUpdateIfFirstAllQueues(
 	return nil, ErrNotFound
 }
 
-// Start starts the event-loop in a go-routine.
-// The event-loop reads events from the eventChan and processes them.
+// Start starts the event loop in a go-routine.
+// The event loop reads events from the eventChan and processes them.
 func (a *Autoupdater) Start() {
 	a.wg.Add(1)
 	go func() {
@@ -1211,7 +1211,7 @@ func (a *Autoupdater) Start() {
 	}()
 }
 
-// Stop stops the event-loop and waits until it terminates.
+// Stop stops the event loop and waits until it terminates.
 // All queues will be deleted, operations that are in progress will be canceled.
 func (a *Autoupdater) Stop() {
 	a.Logger.Debug("autoupdater terminating")
@@ -1222,7 +1222,7 @@ func (a *Autoupdater) Stop() {
 		close(a.shutdownChan)
 	}
 
-	a.Logger.Debug("waiting for event-loop to terminate")
+	a.Logger.Debug("waiting for event loop to terminate")
 	a.wg.Wait()
 
 	a.queuesLock.Lock()

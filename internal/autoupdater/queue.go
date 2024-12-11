@@ -663,28 +663,6 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		)
 
 		if task == TaskTriggerCI {
-			// Prevent a loop where a PR transitions from #1 to
-			// being suspended non-stop. This can happen when a
-			// Jenkins job is configured to cancel previous builds
-			// and reports the status to GitHub.
-			// When the PR becomes #1 in the queue and CI jobs are
-			// already running, CI jobs are scheduled by
-			// directorius. This causes running CI builds to get
-			// canceled. A failure status is reported via github
-			// checks for the canceled builds. directorius suspends
-			// updates for the PR. When the new scheduled CI build
-			// starts, it reports a pending status to github
-			// checks. The PR becomes #1 in the queue again, CI
-			// jobs are triggered again and the loops starts from
-			// the beginning.
-			if pr.CITriggerStatus.CIJobsTriggeredRecently(status.Commit) {
-				logger.Info("skipping triggering ci jobs, builds have been triggered recently on same commit",
-					logfields.Event("triggering_ci_jobs_skipped"),
-					zap.Time("ci.last_triggered_at", pr.CITriggerStatus.At),
-				)
-				return
-			}
-
 			err := q.ci.RunAll(ctx, q.retryer, pr)
 			if err != nil {
 				logger.Error("triggering CI jobs failed",
@@ -693,14 +671,28 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 				)
 				return
 			}
-			pr.CITriggerStatus.Commit = status.Commit
-			pr.CITriggerStatus.At = time.Now()
-
 			logger.Info("ci jobs triggered", logfields.Event("ci_jobs_triggered"))
 			pr.SetStateUnchangedSinceIfNewer(time.Now())
 		}
 
 	case githubclt.CIStatusFailure:
+		newestBuildFailed, err := pr.FailedCIStatusIsForNewestBuild(logger, status.Statuses)
+		if err != nil {
+			logger.Error("evaluating if ci builds from github status last or newer started ci builds failed",
+				zap.Error(err),
+				zap.Any("github.ci_statuses", status),
+			)
+		}
+		if err == nil && !newestBuildFailed {
+			logger.Info("status check is negative "+
+				"but none of the affected ci builds are in the list "+
+				"of recently triggered required jobs, pr is not suspended",
+				zap.Any("ci.build.last_triggered", pr.LastStartedCIBuilds),
+				zap.Any("github.ci_statuses", status),
+			)
+			return
+		}
+
 		if err := q.Suspend(pr.Number); err != nil {
 			logger.Error(
 				"suspending PR because it's PR status is negative, failed",
@@ -716,6 +708,8 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 			logEventUpdatesSuspended,
 			zap.Error(err),
 		)
+
+		return
 
 	default:
 		logger.Warn(
@@ -1035,7 +1029,7 @@ func (q *queue) resumeIfPRMergeStatusPositive(ctx context.Context, logger *zap.L
 	}
 
 	if status.ReviewDecision != githubclt.ReviewDecisionApproved {
-		logger.Info("updates for prs are not resumed, reviewdecision is not positive")
+		logger.Info("updates for pr is not resumed, reviewdecision is not positive")
 		return nil
 	}
 

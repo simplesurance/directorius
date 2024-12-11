@@ -32,6 +32,7 @@ type Config struct {
 type CIClient interface {
 	fmt.Stringer
 	Build(context.Context, *jenkins.Job) (int64, error)
+	GetBuildFromQueueItemID(context.Context, int64) (*jenkins.Build, error)
 }
 
 type CI struct {

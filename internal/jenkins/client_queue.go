@@ -15,6 +15,17 @@ import (
 
 var ErrBuildScheduled = errors.New("build scheduled, build not available yet")
 
+type queueItem struct {
+	Class      string `json:"_class"`
+	Cancelled  bool
+	Executable *queueItemExecutable `json:"executable"`
+}
+
+type queueItemExecutable struct {
+	Class string `json:"_class"`
+	URL   string `json:"url"`
+}
+
 // GetBuildURL queries the status of the queued item with id [queueItemID] and
 // returns the URL of the build if it got a build number assigned.
 
@@ -89,6 +100,21 @@ func (s *Client) GetBuildURL(ctx context.Context, queueItemID int64) (string, er
 	}
 }
 
+// GetBuildFromQueueItemID does the same than [s.GetBuildURL] but returns a [Build] instead of the URL as string.
+func (s *Client) GetBuildFromQueueItemID(ctx context.Context, queueItemID int64) (*Build, error) {
+	url, err := s.GetBuildURL(ctx, queueItemID)
+	if err != nil {
+		return nil, err
+	}
+
+	build, err := ParseBuildURL(url)
+	if err != nil {
+		return nil, fmt.Errorf("retrieving build url (%s) for queued item succeeded but parsing it failed: %w", url, err)
+	}
+
+	return build, nil
+}
+
 func (s *Client) newGetBuildURLRequest(ctx context.Context, queueItemID int64) (*http.Request, error) {
 	reqURL := s.url.JoinPath("queue", "item", strconv.FormatInt(queueItemID, 10), "api", "json")
 	queryParams := make(url.Values, 1)
@@ -103,15 +129,4 @@ func (s *Client) newGetBuildURLRequest(ctx context.Context, queueItemID int64) (
 	addAcceptHeader(req, "application/json")
 
 	return req, nil
-}
-
-type queueItem struct {
-	Class      string `json:"_class"`
-	Cancelled  bool
-	Executable *queueItemExecutable `json:"executable"`
-}
-
-type queueItemExecutable struct {
-	Class string `json:"_class"`
-	URL   string `json:"url"`
 }

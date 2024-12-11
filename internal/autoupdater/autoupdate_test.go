@@ -115,6 +115,16 @@ func mockReadyForMergeStatus(clt *mocks.MockGithubClient, prNumber int, reviewDe
 	return &res
 }
 
+const buildURLFromQueueItemID = "http://localhost.invalid/job/build/1"
+
+func mockGetBuildFromQueueItemID(clt *mocks.MockCIClient) *gomock.Call {
+	b, err := jenkins.ParseBuildURL(buildURLFromQueueItemID)
+	return clt.
+		EXPECT().
+		GetBuildFromQueueItemID(gomock.Any(), gomock.Any()).
+		Return(b, err)
+}
+
 func (a *Autoupdater) getQueue(key BranchID) *queue {
 	a.queuesLock.Lock()
 	defer a.queuesLock.Unlock()
@@ -498,7 +508,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 			testName: "checkrun-success",
 			newResumeEventFn: func(branchNames ...string) *github_prov.Event {
 				return &github_prov.Event{
-					Event: newCheckRunEvent("success", branchNames...),
+					Event: newCheckRunEvent("success", "", branchNames...),
 				}
 			},
 		},
@@ -507,7 +517,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 			testName: "checkrun-neutral",
 			newResumeEventFn: func(branchNames ...string) *github_prov.Event {
 				return &github_prov.Event{
-					Event: newCheckRunEvent("neutral", branchNames...),
+					Event: newCheckRunEvent("neutral", "", branchNames...),
 				}
 			},
 		},
@@ -516,7 +526,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 			testName: "checkrun-neutral",
 			newResumeEventFn: func(branchNames ...string) *github_prov.Event {
 				return &github_prov.Event{
-					Event: newCheckRunEvent("success", branchNames...),
+					Event: newCheckRunEvent("success", "", branchNames...),
 				}
 			},
 		},
@@ -525,7 +535,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 			testName: "checkrun-conclusion-empty",
 			newResumeEventFn: func(branchNames ...string) *github_prov.Event {
 				return &github_prov.Event{
-					Event: newCheckRunEvent("", branchNames...),
+					Event: newCheckRunEvent("", "", branchNames...),
 				}
 			},
 		},
@@ -662,7 +672,7 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 			testName: "checkrun-failure",
 			newResumeEventFn: func(branchNames ...string) *github_prov.Event {
 				return &github_prov.Event{
-					Event: newCheckRunEvent("failure", branchNames...),
+					Event: newCheckRunEvent("failure", "", branchNames...),
 				}
 			},
 		},
@@ -671,7 +681,7 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 			testName: "checkrun-cancelled",
 			newResumeEventFn: func(branchNames ...string) *github_prov.Event {
 				return &github_prov.Event{
-					Event: newCheckRunEvent("cancelled", branchNames...),
+					Event: newCheckRunEvent("cancelled", "", branchNames...),
 				}
 			},
 		},
@@ -680,7 +690,7 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 			testName: "checkrun-action_required",
 			newResumeEventFn: func(branchNames ...string) *github_prov.Event {
 				return &github_prov.Event{
-					Event: newCheckRunEvent("action_required", branchNames...),
+					Event: newCheckRunEvent("action_required", "", branchNames...),
 				}
 			},
 		},
@@ -1015,11 +1025,11 @@ func TestInitialSync(t *testing.T) {
 		AnyTimes()
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, 5).Times(1)
 
-	// we expect 2 calls because we enqueue PRs for 2 base branches
 	ciClient.
 		EXPECT().
 		Build(gomock.Any(), gomock.Any()).
-		Times(2)
+		AnyTimes()
+	mockGetBuildFromQueueItemID(ciClient).AnyTimes()
 
 	prAutoMergeEnabled := newBasicPullRequest(1, "main", "pr1")
 	prAutoMergeEnabled.AutoMerge = &github.PullRequestAutoMerge{}
@@ -1498,6 +1508,7 @@ func TestCIJobsTriggeredOnSync(t *testing.T) {
 	).Times(2)
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	CiBuldCallCounter := mockCIBuildWithCallCnt(ciClient)
+	mockGetBuildFromQueueItemID(ciClient).Times(1)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1630,6 +1641,7 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 
 			mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).MaxTimes(1)
 			ciClient.EXPECT().Build(gomock.Any(), gomock.Any()).Times(tc.ExpectedCICalls)
+			mockGetBuildFromQueueItemID(ciClient).Times(tc.ExpectedCICalls)
 
 			autoupdater := newAutoupdater(
 				ghClient,
@@ -1679,7 +1691,11 @@ func TestPushEventForNotQueuedPR(t *testing.T) {
 	waitForProcessedEventCnt(t, autoupdater, 1)
 }
 
-func TestFrequentCIJobRetriggeringIsPrevented(t *testing.T) {
+func TestCIFailuresFromObsoleteBuildsDoNotSuspendPRs(t *testing.T) {
+	const ciJobURLRel = "job/unittests"
+	const ciLastRunBuildURL = "https://localhost.invalid/" + ciJobURLRel + "/2"
+	const ciFailedStatusBuildURLFromPrevRun = "https://localhost.invalid/" + ciJobURLRel + "/1"
+
 	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
 	evChan := make(chan *github_prov.Event, 1)
 	defer close(evChan)
@@ -1702,14 +1718,26 @@ func TestFrequentCIJobRetriggeringIsPrevented(t *testing.T) {
 					ReviewDecision: githubclt.ReviewDecisionApproved,
 					CIStatus:       githubclt.CIStatusFailure,
 					Commit:         headCommitID,
+					Statuses: []*githubclt.CIJobStatus{{
+						Name:     "unittests",
+						Required: true,
+						JobURL:   ciFailedStatusBuildURLFromPrevRun,
+						Status:   githubclt.CIStatusFailure,
+					}},
 				}, nil
 			}
 			return &githubclt.ReadyForMergeStatus{
 				ReviewDecision: githubclt.ReviewDecisionApproved,
 				CIStatus:       githubclt.CIStatusPending,
 				Commit:         headCommitID,
+				Statuses: []*githubclt.CIJobStatus{{
+					Name:     "unittests",
+					Required: true,
+					JobURL:   ciFailedStatusBuildURLFromPrevRun,
+					Status:   githubclt.CIStatusPending,
+				}},
 			}, nil
-		}).MinTimes(3)
+		}).Times(3)
 
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).AnyTimes()
 
@@ -1721,12 +1749,12 @@ func TestFrequentCIJobRetriggeringIsPrevented(t *testing.T) {
 		true,
 		[]string{triggerLabel},
 	)
-	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: "here"}}
+	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: ciJobURLRel}}
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
-	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(2)
 
 	ciClient.EXPECT().Build(gomock.Any(), gomock.Any()).Times(1)
+	ciClient.EXPECT().GetBuildFromQueueItemID(gomock.Any(), gomock.Any()).Return(jenkins.ParseBuildURL(ciLastRunBuildURL)).Times(1)
 
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -1742,12 +1770,16 @@ func TestFrequentCIJobRetriggeringIsPrevented(t *testing.T) {
 	assert.Equal(t, 1, queue.activeLen())
 	assert.Empty(t, queue.suspended)
 
+	// failure event from previous running CI build that has been canceled
 	evChan <- &github_prov.Event{Event: newStatusEvent("failure", prBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 2)
+	// pending event from last triggered CI build is received afterwards, has no effect
 	evChan <- &github_prov.Event{Event: newStatusEvent("pending", prBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 3)
+	// failure event from another previous running CI build that has been canceled is received
 	evChan <- &github_prov.Event{Event: newStatusEvent("failure", prBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 4)
-	evChan <- &github_prov.Event{Event: newStatusEvent("pending", prBranch)}
-	waitForProcessedEventCnt(t, autoupdater, 5)
+
+	assert.Equal(t, 1, queue.activeLen())
+	assert.Empty(t, queue.suspended)
 }

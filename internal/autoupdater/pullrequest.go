@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/go-github/v59/github"
 
+	"github.com/simplesurance/directorius/internal/githubclt"
+	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/logfields"
 )
 
@@ -21,8 +23,10 @@ type PullRequest struct {
 	Link      string
 	LogFields []zap.Field
 
-	EnqueuedSince   time.Time
-	CITriggerStatus CILastRun
+	EnqueuedSince time.Time
+
+	// LastStartedCIBuilds keys are [jenkins.Build.jobName]
+	LastStartedCIBuilds map[string]*jenkins.Build
 
 	stateUnchangedSince time.Time
 	lock                sync.Mutex // must be held when accessing stateUnchangedSince
@@ -61,6 +65,7 @@ func NewPullRequest(nr int, branch, author, title, link string) (*PullRequest, e
 			logfields.PullRequest(nr),
 			logfields.Branch(branch),
 		},
+		LastStartedCIBuilds: map[string]*jenkins.Build{},
 	}, nil
 }
 
@@ -99,4 +104,49 @@ func (p *PullRequest) SetStateUnchangedSinceIfZero(t time.Time) {
 	if p.stateUnchangedSince.IsZero() {
 		p.stateUnchangedSince = t
 	}
+}
+
+// FailedCIStatusIsForNewestBuild returns true if a required and failed status
+// in [statuses] is for a job in [pr.LastStartedCIBuilds] and has the same or
+// newer build id.
+//
+// This function is not concurrency-safe, reading and writing to
+// [pr.CITriggerStatus.BuildURLs] must be serialized by for example only
+// running both operations as part of [queue.updatePR].
+func (p *PullRequest) FailedCIStatusIsForNewestBuild(logger *zap.Logger, statuses []*githubclt.CIJobStatus) (bool, error) {
+	if len(statuses) == 0 {
+		return false, errors.New("github status ci job list is empty")
+	}
+
+	for _, status := range statuses {
+		if !status.Required || status.Status != githubclt.CIStatusFailure {
+			continue
+		}
+
+		build, err := jenkins.ParseBuildURL(status.JobURL)
+		if err != nil {
+			logger.Warn(
+				"parsing ci job url from github webhook as jenkins build url failed,",
+				logfields.CIBuildURL(build.String()),
+				zap.Error(err),
+			)
+			return false, fmt.Errorf("parsing ci job url (%q) from github webhook as jenkins build url failed: %w", status.JobURL, err)
+		}
+
+		lastBuild, exists := p.LastStartedCIBuilds[build.JobName]
+		if !exists {
+			continue
+		}
+
+		if build.Number >= lastBuild.Number {
+			logger.Debug("failed ci job status is for latest or newer build",
+				logfields.CIJob(build.JobName),
+				zap.Stringer("ci.latest_build", lastBuild),
+				zap.Stringer("github.ci_failed_status_build", build),
+			)
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

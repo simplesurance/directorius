@@ -145,7 +145,7 @@ func newStatusEvent(state string, branch ...string) *github.StatusEvent {
 	}
 }
 
-func newCheckRunEvent(conclusion string, branches ...string) *github.CheckRunEvent {
+func newCheckRunEvent(conclusion, ciDetailsURL string, branches ...string) *github.CheckRunEvent {
 	prs := make([]*github.PullRequest, 0, len(branches))
 	for _, br := range branches {
 		prs = append(prs, newBasicPullRequest(1, "master", br))
@@ -161,6 +161,7 @@ func newCheckRunEvent(conclusion string, branches ...string) *github.CheckRunEve
 		CheckRun: &github.CheckRun{
 			PullRequests: prs,
 			Conclusion:   &conclusion,
+			DetailsURL:   &ciDetailsURL,
 		},
 	}
 }
