@@ -86,8 +86,13 @@ func (s *Client) GetBuildURL(ctx context.Context, queueItemID int64) (string, er
 		return "", goorderr.NewRetryableAnytimeError(ErrBuildScheduled)
 
 	case "hudson.model.Queue$LeftItem":
+		if item.Cancelled {
+			return "", errors.New("queue item was cancelled")
+		}
+
 		if item.Executable == nil {
-			return "", fmt.Errorf("executable entry in unmarshalled %q does not exit, json: %s", item.Class, string(respBytes))
+			// this happens sometimes, the result is probably not available yet
+			return "", goorderr.NewRetryableAnytimeError(fmt.Errorf("executable entry in unmarshalled %q does not exit, json: %s", item.Class, string(respBytes)))
 		}
 
 		if item.Executable.URL == "" {
