@@ -6,8 +6,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
-
-	"github.com/simplesurance/directorius/internal/logfields"
 )
 
 const metricNamespace = "directorius"
@@ -78,10 +76,8 @@ func newMetricCollector() *metricCollector {
 }
 
 func (m *metricCollector) logGetMetricFailed(metricName string, err error) {
-	m.logger.Warn(
-		"could not record metric",
+	m.logger.Warn("could not record metric",
 		zap.String("metric", metricName),
-		logfields.Event("recording_metric_failed"),
 		zap.Error(err),
 	)
 }

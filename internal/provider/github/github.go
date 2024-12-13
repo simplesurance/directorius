@@ -53,13 +53,12 @@ func (p *Provider) HTTPHandler(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	logger := p.logging.With(logFields...)
-	logger.Debug("received a http request", logfields.Event("github_event_received"))
+	logger.Debug("received a http request")
 
 	payload, err := github.ValidatePayload(req, p.webhookSecret)
 	if err != nil {
 		logger.Info(
 			"received invalid http request, payload validation failed",
-			logfields.Event("github_http_request_validation_failed"),
 			zap.Error(err),
 		)
 		http.Error(resp, err.Error(), http.StatusBadRequest)
@@ -70,7 +69,6 @@ func (p *Provider) HTTPHandler(resp http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		logger.Info(
 			"received invalid http request, parsing failed",
-			logfields.Event("github_event_parsing_failed"),
 			zap.Error(err),
 		)
 		http.Error(resp, err.Error(), http.StatusBadRequest)
@@ -90,15 +88,12 @@ func (p *Provider) HTTPHandler(resp http.ResponseWriter, req *http.Request) {
 
 		select {
 		case ch <- &ev:
-			logger.Debug("event forwarded to channel",
-				logfields.Event("github_event_forwarded"),
-			)
+			logger.Debug("event forwarded to channel")
 
 		default:
 			logger.Warn(
 				"event lost, forwarding event to channel failed",
 				zap.String("error", "could not forward event to channel, send would have blocked"),
-				logfields.Event("github_forwarding_event_failed"),
 			)
 		}
 	}

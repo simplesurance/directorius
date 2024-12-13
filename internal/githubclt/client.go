@@ -170,8 +170,7 @@ func (clt *Client) UpdateBranch(ctx context.Context, owner, repo string, pullReq
 	)
 
 	if isUptodate {
-		logger.Debug("branch is up-to-date with base branch, skipping running update branch operation",
-			logfields.Event("github_branch_uptodate_with_base"))
+		logger.Debug("branch is up-to-date with base branch, skipping running update branch operation")
 		return &UpdateBranchResult{HeadCommitID: prHEADSHA}, nil
 	}
 
@@ -181,8 +180,7 @@ func (clt *Client) UpdateBranch(ctx context.Context, owner, repo string, pullReq
 			// It is not clear if the response ensures that the
 			// branch will be updated or if the scheduled operation
 			// can fail.
-			logger.Debug("updating branch with base branch scheduled",
-				logfields.Event("github_branch_update_with_base_scheduled"))
+			logger.Debug("updating branch with base branch scheduled")
 			return &UpdateBranchResult{Scheduled: true, Changed: true}, nil
 		}
 
@@ -194,9 +192,7 @@ func (clt *Client) UpdateBranch(ctx context.Context, owner, repo string, pullReq
 				}
 
 				if strings.Contains(respErr.Message, "expected head sha didn’t match current head ref") {
-					logger.Debug("branch changed while trying to sync with base branch",
-						logfields.Event("github_branch_update_failed_ref_outdated"),
-					)
+					logger.Debug("branch changed while trying to sync with base branch")
 
 					return nil, goorderr.NewRetryableAnytimeError(err)
 				}
@@ -206,8 +202,7 @@ func (clt *Client) UpdateBranch(ctx context.Context, owner, repo string, pullReq
 		return nil, clt.wrapRetryableErrors(err)
 	}
 
-	logger.Debug("branch was updated with base branch",
-		logfields.Event("github_branch_update_with_base_triggered"))
+	logger.Debug("branch was updated with base branch")
 	// github seems to always schedule update operations and return an
 	// AcceptedError, this condition might never happened
 	return &UpdateBranchResult{Changed: true, HeadCommitID: prHEADSHA}, nil
@@ -244,7 +239,6 @@ func (clt *Client) RemoveLabel(ctx context.Context, owner, repo string, pullRequ
 					logfields.Repository(repo),
 					logfields.PullRequest(pullRequestOrIssueNumber),
 					logfields.Label(label),
-					logfields.Event("github_remove_label_returned_not_found"),
 					zap.Error(err),
 				)
 
@@ -338,7 +332,6 @@ func (clt *Client) wrapRetryableErrors(err error) error {
 	case *github.RateLimitError:
 		clt.logger.Info(
 			"rate limit exceeded",
-			logfields.Event("github_api_rate_limit_exceeded"),
 			zap.Int("github_api_rate_limit", v.Rate.Limit),
 			zap.Int("github_api_rate_limit", v.Rate.Limit),
 			zap.Time("github_api_rate_limit_reset_time", v.Rate.Reset.Time),

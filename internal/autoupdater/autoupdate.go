@@ -227,7 +227,6 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for unmonitored repository",
-				logEventEventIgnored,
 			)
 
 			return
@@ -239,7 +238,6 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
-				logEventEventIgnored,
 			)
 
 			return
@@ -251,7 +249,6 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
-				logEventEventIgnored,
 			)
 
 			return
@@ -263,7 +260,6 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
-				logEventEventIgnored,
 			)
 
 			return
@@ -274,7 +270,6 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
-				logEventEventIgnored,
 			)
 
 			return
@@ -283,7 +278,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processPullRequestReviewEvent(ctx, logger, ev)
 
 	default:
-		logger.Debug("event ignored", logEventEventIgnored)
+		logger.Debug("event ignored")
 	}
 }
 
@@ -329,7 +324,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if !a.TriggerOnAutomerge {
 			logger.Debug(
 				"event ignored, triggerOnAutomerge is disabled",
-				logEventEventIgnored,
 			)
 			return
 		}
@@ -338,7 +332,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomplete base branch information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -349,7 +342,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomplete pull request information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -361,7 +353,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				logger,
 				"ignoring event, could not append pull request to queue",
 				err,
-				logEventEventIgnored,
 			)
 
 			return
@@ -369,7 +360,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"pull request enqueued for updates",
-			logEventEnqeued,
 			logFieldReason("auto_merge_enabled"),
 		)
 
@@ -380,7 +370,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if ev.GetPullRequest().GetState() == "closed" {
 			logger.Warn(
 				"ignoring event, label was added to a closed pull request",
-				logEventEventIgnored,
 			)
 
 			return
@@ -389,7 +378,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if labelName == "" {
 			logger.Warn(
 				"ignoring event, event with action 'labeled' has empty label name",
-				logEventEventIgnored,
 			)
 
 			return
@@ -403,7 +391,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomplete base branch information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -416,7 +403,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				logger,
 				"ignoring event, incomplete pull request information",
 				err,
-				logEventEventIgnored,
 			)
 
 			return
@@ -425,7 +411,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err := a.Enqueue(ctx, bb, pr); err != nil {
 			logger.Error(
 				"ignoring event, enqueing pull request failed",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -434,7 +419,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"pull request enqueued for updates",
-			logEventEnqeued,
 			logFieldReason("labeled"),
 		)
 
@@ -442,7 +426,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if !a.TriggerOnAutomerge {
 			logger.Debug(
 				"event ignored, triggerOnAutomerge is disabled",
-				logEventEventIgnored,
 			)
 
 			return
@@ -454,7 +437,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomplete base branch information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -465,7 +447,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomplete pull request information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -478,7 +459,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				logger,
 				"ignoring event, disabling updates for pr failed",
 				err,
-				logEventEventIgnored,
 			)
 			return
 		}
@@ -490,11 +470,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			reason = logFieldReason(action)
 		}
 
-		logger.Info(
-			"pull request dequeued for updates",
-			logEventDequeued,
-			reason,
-		)
+		logger.Info("pull request dequeued for updates", reason)
 
 	case "unlabeled":
 		labelName := ev.GetLabel().GetName()
@@ -503,7 +479,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if labelName == "" {
 			logger.Warn(
 				"ignoring event, event with action 'unlabeled' has empty label name",
-				logEventEventIgnored,
 			)
 
 			return
@@ -517,7 +492,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomplete base branch information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -528,7 +502,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomplete pull request information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -544,7 +517,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"pull request dequeued for updates",
-			logEventDequeued,
 			logFieldReason("unlabeled"),
 		)
 
@@ -554,7 +526,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			logger.Warn(
 				"can not resume PRs, incomplete base branch information",
 				zap.Error(err),
-				logEventEventIgnored,
 			)
 
 			return
@@ -564,7 +535,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err == nil {
 			logger.Info(
 				"update for pull request triggered",
-				logfields.Event("pull_request_update_triggered"),
 				logFieldReason("branch_changed"),
 			)
 
@@ -591,7 +561,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"updates resumed, pr branch changed",
-			logEventUpdatesResumed,
 			logFieldReason("branch_changed"),
 		)
 
@@ -607,7 +576,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomple old base branch information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -637,16 +605,13 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"pr was moved to another base-branch queue",
-			logfields.Event("base_branch_queue_changed"),
 			logFieldReason("base_branch_changed"),
 			zap.String("git.old_base_branch", oldBaseBranch.Branch),
 			logfields.BaseBranch(bb.Branch),
 		)
 
 	default:
-		logger.Debug("ignoring irrelevant pull request event",
-			logEventEventIgnored,
-		)
+		logger.Debug("ignoring irrelevant pull request event")
 	}
 }
 
@@ -670,7 +635,6 @@ func (a *Autoupdater) processPushEvent(ctx context.Context, logger *zap.Logger, 
 	if err != nil {
 		logger.Warn(
 			"ignoring event, incomplete branch information",
-			logEventEventIgnored,
 			zap.Error(err),
 		)
 
@@ -685,7 +649,6 @@ func (a *Autoupdater) processPushEvent(ctx context.Context, logger *zap.Logger, 
 		logger.Debug(
 			"ignoring event, queue for base branch does not exist",
 			zap.Error(err),
-			logEventEventIgnored,
 			logfields.BaseBranch(bb.Branch),
 		)
 		return
@@ -727,7 +690,7 @@ func (a *Autoupdater) processPullRequestReviewEvent(ctx context.Context, logger 
 		}
 
 		if action != "dismissed" {
-			logger.Debug("event ignored, irrelevant action value", logEventEventIgnored)
+			logger.Debug("event ignored, irrelevant action value")
 			return
 		}
 
@@ -739,7 +702,6 @@ func (a *Autoupdater) processPullRequestReviewEvent(ctx context.Context, logger 
 		if err != nil {
 			logger.Warn(
 				"ignoring event, incomplete base branch information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 			return
@@ -757,14 +719,13 @@ func (a *Autoupdater) processPullRequestReviewEvent(ctx context.Context, logger 
 
 		logger.Info(
 			"update for pull request triggered",
-			logfields.Event("pull_request_update_triggered"),
 			logFieldReason("pr_review_changes_requested"),
 		)
 
 		return
 
 	default:
-		logger.Debug("event ignored, irrelevant review state", logEventEventIgnored)
+		logger.Debug("event ignored, irrelevant review state")
 		return
 	}
 }
@@ -800,10 +761,7 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 	logger.Debug("event received")
 
 	if len(branches) == 0 {
-		logger.Info(
-			"ignoring event, pull request or branches fields are empty",
-			logEventEventIgnored,
-		)
+		logger.Info("ignoring event, pull request or branches fields are empty")
 
 		return
 	}
@@ -821,7 +779,6 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 		if err != nil {
 			logger.Warn(
 				"ignoring check run event for pull-request, incomplete base branch information",
-				logEventEventIgnored,
 				zap.Error(err),
 			)
 
@@ -830,14 +787,12 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 				if errors.Is(err, ErrNotFound) {
 					logger.Debug(
 						"pr not queued, can not update stale timestamp",
-						logEventEventIgnored,
 					)
 					continue
 				}
 				logger.Error(
 					"updating stale timestamp failed",
 					zap.Error(err),
-					logfields.Event("updating_stale_timestamp_failed"),
 				)
 			}
 		}
@@ -860,7 +815,6 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 			logger.With(pr.LogFields...).Info(
 				"update triggered, negative check run conclusion received",
 				logFieldReason("check_run_result_negative"),
-				logEventUpdatesSuspended,
 			)
 		}
 
@@ -868,9 +822,7 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 		a.ResumeIfStatusPositive(ctx, owner, repo, branches)
 
 	default: // stale event is ignored
-		logger.Info("ignoring event with irrelevant or unsupported check run conclusion",
-			logEventEventIgnored,
-		)
+		logger.Info("ignoring event with irrelevant or unsupported check run conclusion")
 	}
 }
 
@@ -889,10 +841,7 @@ func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger
 	logger.Debug("event received")
 
 	if len(branches) == 0 {
-		logger.Info(
-			"ignorning event, pull request or branches fields are empty",
-			logEventEventIgnored,
-		)
+		logger.Info("ignorning event, pull request or branches fields are empty")
 
 		return
 	}
@@ -902,7 +851,6 @@ func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger
 		logger.Debug(
 			"no pr queued for branches, can not update stale timestamp",
 			zap.Strings("not_found_branches", notFound),
-			logEventEventIgnored,
 		)
 	}
 
@@ -923,7 +871,6 @@ func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger
 			logger.With(pr.LogFields...).Info(
 				"update triggered, negative status check event received",
 				logFieldReason("status_check_negative"),
-				logEventUpdatesSuspended,
 			)
 		}
 
@@ -931,9 +878,7 @@ func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger
 		a.ResumeIfStatusPositive(ctx, owner, repo, branches)
 
 	default:
-		logger.Debug("ignoring event with irrelevant or unsupported status",
-			logEventEventIgnored,
-		)
+		logger.Debug("ignoring event with irrelevant or unsupported status")
 	}
 }
 
@@ -963,9 +908,7 @@ func (a *Autoupdater) Enqueue(_ context.Context, baseBranch *BaseBranch, pr *Pul
 		)
 
 		a.queues[baseBranch.BranchID] = q
-		logger.Debug("queue for base branch created",
-			logfields.Event("update_queue_created"),
-		)
+		logger.Debug("queue for base branch created")
 	}
 
 	if err := q.Enqueue(pr); err != nil {

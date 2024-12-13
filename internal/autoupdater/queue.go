@@ -113,9 +113,7 @@ func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retry
 	if qm, err := newQueueMetrics(base.BranchID); err == nil {
 		q.metrics = qm
 	} else {
-		q.logger.Warn(
-			"could not create prometheus metrics",
-			logfields.Event("creating_queue_metrics_failed"),
+		q.logger.Warn("could not create prometheus metrics",
 			zap.Error(err),
 		)
 	}
@@ -170,7 +168,6 @@ func (q *queue) cancelActionForPR(prNumber int) {
 			running.cancelFunc()
 			q.logger.Debug(
 				"cancelled running task for pr",
-				logfields.Event("task_cancelled"),
 				logfields.PullRequest(prNumber),
 			)
 		}
@@ -219,17 +216,13 @@ func (q *queue) _enqueueActive(pr *PullRequest) error {
 	q.metrics.ActiveQueueSizeInc()
 
 	if !newFirstElemen {
-		q.logger.Debug(
-			"pull request appended to active queue",
-			logfields.Event("pull_request_enqueued"),
-		)
+		q.logger.Debug("pull request appended to active queue")
 
 		return nil
 	}
 
 	logger.Debug(
 		"pull request appended to active queue, first element changed, scheduling action",
-		logfields.Event("pull_request_enqueued"),
 	)
 
 	q.scheduleUpdate(context.Background(), pr, TaskTriggerCI)
@@ -290,10 +283,7 @@ func (q *queue) Dequeue(prNumber int) (*PullRequest, error) {
 		q.lock.Unlock()
 
 		logger := q.logger.With(pr.LogFields...)
-		logger.Debug(
-			"pull request removed from suspend queue",
-			logfields.Event("pull_request_dequeued_suspended"),
-		)
+		logger.Debug("pull request removed from suspend queue")
 
 		pr.SetStateUnchangedSince(time.Time{})
 
@@ -312,12 +302,8 @@ func (q *queue) Dequeue(prNumber int) (*PullRequest, error) {
 	q.cancelActionForPR(prNumber)
 	removed.SetStateUnchangedSince(time.Time{})
 
-	q.logger.Debug(
-		"pull request removed from active queue",
-		append([]zap.Field{
-			logfields.Event("pull_request_dequeued_active"),
-		}, removed.LogFields...)...,
-	)
+	q.logger.Debug("pull request removed from active queue",
+		removed.LogFields...)
 
 	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", removed)
 
@@ -326,7 +312,6 @@ func (q *queue) Dequeue(prNumber int) (*PullRequest, error) {
 	}
 
 	q.logger.Debug("removing pr changed first element, triggering action",
-		logfields.Event("pull_request_updates_suspended_new_first"),
 		zap.Int("github.pull_request_suspended", removed.Number),
 		zap.Int("github.pull_request_new_first", newFirstElem.Number),
 	)
@@ -360,10 +345,8 @@ func (q *queue) Suspend(prNumber int) error {
 	q.suspended[prNumber] = pr
 	q.metrics.SuspendQueueSizeInc()
 
-	q.logger.Debug(
-		"pr moved to suspend queue",
-		append([]zap.Field{logfields.Event("pull_request_updates_suspended")},
-			pr.LogFields...)...,
+	q.logger.Debug("pr moved to suspend queue",
+		pr.LogFields...,
 	)
 	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", pr)
 
@@ -373,7 +356,6 @@ func (q *queue) Suspend(prNumber int) error {
 
 	q.logger.Debug(
 		"moving pr to suspend queue changed first element, triggering update",
-		logfields.Event("pull_request_updates_suspended_new_first"),
 		zap.Int("github.pull_request_suspended", pr.Number),
 		zap.Int("github.pull_request_new_first", newFirstElem.Number),
 	)
@@ -393,9 +375,7 @@ func (q *queue) ResumeAll() {
 		logger := q.logger.With(pr.LogFields...)
 
 		if err := q._enqueueActive(pr); err != nil {
-			logger.Error(
-				"could not move PR from suspended to active state",
-				logfields.Event("enqueue_failed"),
+			logger.Error("could not move PR from suspended to active state",
 				zap.Error(err),
 			)
 
@@ -403,10 +383,7 @@ func (q *queue) ResumeAll() {
 		}
 
 		_, _ = q._dequeueSuspended(prNum)
-		logger.Info(
-			"autoupdates for pr resumed",
-			logfields.Event("pull_request_updates_resumed"),
-		)
+		logger.Info("autoupdates for pr resumed")
 	}
 }
 
@@ -470,8 +447,7 @@ func (q *queue) scheduleUpdate(ctx context.Context, pr *PullRequest, task Task) 
 		q.setExecuting(nil)
 	})
 
-	q.logger.With(pr.LogFields...).
-		Debug("update scheduled", logfields.Event("update_scheduled"))
+	q.logger.Debug("update scheduled", pr.LogFields...)
 }
 
 func isPRIsClosedErr(err error) bool {
@@ -528,19 +504,13 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 	pr.SetStateUnchangedSinceIfZero(time.Now())
 
 	if err := ctx.Err(); err != nil {
-		logger.Debug(
-			"skipping update",
-			zap.Error(err), logEventUpdateSkipped,
-		)
+		logger.Debug("skipping update", zap.Error(err))
 
 		return
 	}
 
 	if !q.isFirstActive(pr) {
-		logger.Debug(
-			"skipping update, pull request is not first in queue",
-			logEventUpdateSkipped,
-		)
+		logger.Debug("skipping update, pull request is not first in queue")
 		return
 	}
 
@@ -554,9 +524,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 	status, err := q.prReadyForMergeStatus(ctx, pr)
 	if err != nil {
-		logger.Error(
-			"checking pr merge status failed",
-			logfields.Event("pr_merge_status_check_failed"),
+		logger.Error("checking pr merge status failed",
 			zap.Error(err),
 		)
 		return
@@ -566,7 +534,6 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		if err := q.Suspend(pr.Number); err != nil {
 			logger.Error(
 				"suspending PR because it is not approved, failed",
-				logfields.Event("suspending_pr_updates_failed"),
 				zap.Error(err),
 			)
 
@@ -576,7 +543,6 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		logger.Info(
 			"updates suspended, pr is not approved",
 			logFieldReason("pr_not_approved"),
-			logEventUpdatesSuspended,
 			zap.Error(err),
 		)
 
@@ -594,9 +560,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 	timer.Stop()
 
 	if branchChanged {
-		logger.Info(
-			"branch updated with changes from base branch",
-			logfields.Event("github_branch_updated"),
+		logger.Info("branch updated with changes from base branch",
 			logfields.Commit(updateHeadCommit),
 		)
 
@@ -610,9 +574,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 	if q.isPRStale(pr) {
 		if err := q.Suspend(pr.Number); err != nil {
-			logger.Error(
-				"suspending PR because it's stale, failed",
-				logfields.Event("suspending_pr_updates_failed"),
+			logger.Error("suspending PR because it's stale, failed",
 				zap.Error(err),
 			)
 			return
@@ -628,9 +590,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		return
 	}
 
-	logger.Debug(
-		"pull request is not stale",
-		logfields.Event("pr_not_stale"),
+	logger.Debug("pull request is not stale",
 		zap.Time("last_pr_status_change", pr.GetStateUnchangedSince()),
 		zap.Duration("stale_timeout", q.staleTimeout),
 	)
@@ -649,29 +609,24 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 	switch status.CIStatus {
 	case githubclt.CIStatusSuccess:
-		logger.Info(
-			"pull request is uptodate, approved and status checks are successful",
-			logfields.Event("pr_ready_to_merge"),
-		)
+		logger.Info("pull request is uptodate, approved and status checks are successful")
 
 	case githubclt.CIStatusPending:
 		q.prAddQueueHeadLabel(ctx, pr)
 
 		logger.Info(
 			"pull request is uptodate, approved and status checks are pending",
-			logfields.Event("pr_status_pending"),
 		)
 
 		if task == TaskTriggerCI {
 			err := q.ci.RunAll(ctx, q.retryer, pr)
 			if err != nil {
 				logger.Error("triggering CI jobs failed",
-					logfields.Event("triggering_ci_jobs_failed"),
 					zap.Error(err),
 				)
 				return
 			}
-			logger.Info("ci jobs triggered", logfields.Event("ci_jobs_triggered"))
+			logger.Info("ci jobs triggered")
 			pr.SetStateUnchangedSinceIfNewer(time.Now())
 		}
 
@@ -696,7 +651,6 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		if err := q.Suspend(pr.Number); err != nil {
 			logger.Error(
 				"suspending PR because it's PR status is negative, failed",
-				logfields.Event("suspending_pr_updates_failed"),
 				zap.Error(err),
 			)
 			return
@@ -705,22 +659,17 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		logger.Info(
 			"updates suspended, status check is negative",
 			logFieldReason("status_check_negative"),
-			logEventUpdatesSuspended,
 			zap.Error(err),
 		)
 
 		return
 
 	default:
-		logger.Warn(
-			"pull request ci status has unexpected value, suspending autoupdates for PR",
-			logfields.Event("pr_status_check_rollup_state_invalid"),
-		)
+		logger.Warn("pull request ci status has unexpected value, suspending autoupdates for PR")
 
 		if err := q.Suspend(pr.Number); err != nil {
 			logger.Error(
 				"suspending PR because it's status check rollup state has an invalid value, failed",
-				logfields.Event("suspending_pr_updates_failed"),
 				zap.Error(err),
 			)
 
@@ -730,7 +679,6 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		logger.Info(
 			"updates suspended, status check rollup value invalid",
 			logFieldReason("status_check_rollup_state_invalid"),
-			logEventUpdatesSuspended,
 			zap.Error(err),
 		)
 	}
@@ -777,14 +725,11 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 		if isPRIsClosedErr(updateBranchErr) {
 			logger.Info(
 				"updating branch with base branch failed, pull request is closed, removing PR from queue",
-				logfields.Event("branch_update_failed"),
 				zap.Error(updateBranchErr),
 			)
 
 			if _, err := q.Dequeue(pr.Number); err != nil {
-				logger.Error(
-					"removing pr from queue after failed update failed",
-					logfields.Event("branch_update_failed"),
+				logger.Error("removing pr from queue after failed update failed",
 					zap.Error(err),
 				)
 				return false, "", errors.Join(updateBranchErr, err)
@@ -792,7 +737,6 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 
 			logger.Info(
 				"pull request dequeued for updates",
-				logEventDequeued,
 				logReasonPRClosed,
 			)
 
@@ -802,7 +746,6 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 		if errors.Is(updateBranchErr, context.Canceled) {
 			logger.Debug(
 				"updating branch with base branch was cancelled",
-				logfields.Event("branch_update_cancelled"),
 			)
 
 			return false, "", updateBranchErr
@@ -814,7 +757,6 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 		if err := q.Suspend(pr.Number); err != nil {
 			logger.Error(
 				"suspending PR failed, after branch update also failed",
-				logfields.Event("suspending_pr_updates_failed"),
 				zap.Error(err),
 			)
 			return false, "", errors.Join(updateBranchErr, err)
@@ -823,7 +765,6 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 		logger.Info(
 			"updates suspended, updating pr branch with base branch failed",
 			logFieldReason("update_with_branch_failed"),
-			logEventUpdatesSuspended,
 			zap.Error(updateBranchErr),
 		)
 
@@ -920,18 +861,15 @@ func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
 	}, pr.LogFields)
 	if err != nil {
 		q.logger.Warn("adding label to PR failed",
-			append([]zapcore.Field{
-				logfields.Event("github_add_label_failed"),
+			logfields.NewWith(pr.LogFields,
+				logfields.Operation("github.add_label_failed"),
 				zap.Error(err),
 				zap.String("github_label", q.headLabel),
-			}, pr.LogFields...)...)
+			)...)
 	}
 
 	q.logger.Info("queue head label was added to pr",
-		append([]zapcore.Field{
-			logfields.Event("github_label_added"),
-			zap.String("github_label", q.headLabel),
-		}, pr.LogFields...)...)
+		logfields.NewWith(pr.LogFields, zap.String("github_label", q.headLabel))...)
 }
 
 func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr *PullRequest) {
@@ -943,11 +881,10 @@ func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr
 			pr.Number,
 			q.headLabel,
 		)
-	}, pr.LogFields)
+	}, logfields.NewWith(pr.LogFields, logfields.Operation("github.remove_label")))
 	if err != nil {
 		q.logger.Warn("removing label from PR failed",
 			append([]zapcore.Field{
-				logfields.Event("github_removing_label_failed"),
 				zap.Error(err),
 				zap.String("github_label", q.headLabel),
 				logFieldReason(logReason),
@@ -955,7 +892,6 @@ func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr
 	}
 	q.logger.Info("queue head label was removed from pr",
 		append([]zapcore.Field{
-			logfields.Event("github_label_removed"),
 			zap.String("github_label", q.headLabel),
 		}, pr.LogFields...)...)
 }
@@ -1039,10 +975,7 @@ func (q *queue) resumeIfPRMergeStatusPositive(ctx context.Context, logger *zap.L
 			return fmt.Errorf("resuming updates failed: %w", err)
 		}
 
-		logger.Info(
-			"updates resumed, pr is approved and status check rollup is positive",
-			logEventUpdatesResumed,
-		)
+		logger.Info("updates resumed, pr is approved and status check rollup is positive")
 
 		return nil
 
@@ -1076,8 +1009,7 @@ func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRe
 		}
 	})
 
-	q.logger.With(pr.LogFields...).
-		Debug("checking PR status scheduled", logfields.Event("status_check_scheduled"))
+	q.logger.Debug("checking PR status scheduled", pr.LogFields...)
 }
 
 // Stop clears all queues and stops running tasks.

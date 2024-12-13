@@ -26,7 +26,7 @@ const (
 // This is intended to be run before Autoupdater is started.
 // Pull request information is queried from github.
 // If a PR meets a condition to be enqueued for auto-updates it is enqueued.
-// If it meets a condition for not being autoupdated, it is dequeued.
+// If it meets a condition for not being automatically updated, it is dequeued.
 // If a PR has the [a.headLabel] set it is removed.
 func (a *Autoupdater) InitSync(ctx context.Context) error {
 	for repo := range a.MonitoredRepositories {
@@ -47,10 +47,7 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 		logfields.RepositoryOwner(owner),
 	)
 
-	logger.Info(
-		"starting synchronization",
-		logfields.Event("initial_sync_started"),
-	)
+	logger.Info("starting synchronization")
 
 	var stateFilter string
 	a.queuesLock.Lock()
@@ -96,7 +93,6 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 				if err != nil {
 					logger.Warn(
 						"removing pull request label failed",
-						logfields.Event("github_label_remove_failed"),
 						zap.Error(err),
 					)
 				}
@@ -104,34 +100,25 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 			case enqueue:
 				err := a.enqueuePR(ctx, owner, repo, pr)
 				if errors.Is(err, ErrAlreadyExists) {
-					logger.Debug(
-						"queue in-sync, pr is enqueued",
-						logfields.Event("queue_in_sync"),
-					)
+					logger.Debug("queue in-sync, pr is enqueued")
 					break
 				}
 				if err != nil {
 					stats.Failures++
 					logger.Warn(
 						"adding pr to queue failed",
-						logEventEventIgnored,
 						zap.Error(err),
 					)
 					break
 				}
 
 				stats.Enqueued++
-				logger.Info(
-					"queue was out of sync, enqueued pr",
-					logfields.Event("queue_out_of_sync"),
-				)
+				logger.Info("queue was out of sync, enqueued pr")
 
 			case dequeue:
 				err := a.dequeuePR(ctx, owner, repo, pr)
 				if errors.Is(err, ErrNotFound) {
-					logger.Debug(
-						"queue in-sync, pr not queued",
-						logfields.Event("queue_in_sync"),
+					logger.Debug("queue in-sync, pr not queued",
 						zap.Error(err),
 					)
 					break
@@ -139,19 +126,14 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 
 				if err != nil {
 					stats.Failures++
-					logger.Warn(
-						"dequeing pull request failed",
-						logEventEventIgnored,
+					logger.Warn("dequeing pull request failed",
 						zap.Error(err),
 					)
 					break
 				}
 
 				stats.Dequeued++
-				logger.Info(
-					"queue was out of sync, pr dequeued",
-					logfields.Event("queue_out_of_sync"),
-				)
+				logger.Info("queue was out of sync, pr dequeued")
 
 			default:
 				logger.DPanic(
@@ -211,7 +193,7 @@ func (a *Autoupdater) removeLabel(ctx context.Context, repoOwner, repo string, g
 			repoOwner, repo, pr.Number,
 			a.HeadLabel,
 		)
-	}, append(pr.LogFields, logfields.Event("github_remove_label")))
+	}, append(pr.LogFields, logfields.Operation("github_remove_label")))
 }
 
 func (a *Autoupdater) evaluateActions(pr *github.PullRequest) []syncAction {

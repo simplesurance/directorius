@@ -10,7 +10,6 @@ import (
 	"github.com/cenkalti/backoff"
 
 	"github.com/simplesurance/directorius/internal/goorderr"
-	"github.com/simplesurance/directorius/internal/logfields"
 )
 
 // DefTimeout is used as timeout for runs when the passed context has no deadline set.
@@ -85,7 +84,6 @@ func (r *Retryer) Run(ctx context.Context, fn func(context.Context) error, logF 
 
 			logger.Debug(
 				"running action",
-				logfields.Event("action_running"),
 				zap.Duration("age", bo.GetElapsedTime()),
 			)
 
@@ -122,7 +120,6 @@ func (r *Retryer) Run(ctx context.Context, fn func(context.Context) error, logF 
 
 					logger.Info(
 						"action failed, retry scheduled",
-						logfields.Event("action_retry_scheduled"),
 						zap.Duration("retry_in", retryIn),
 					)
 
@@ -143,7 +140,7 @@ func (r *Retryer) Run(ctx context.Context, fn func(context.Context) error, logF 
 // Stop notifies all Run() methods to terminate.
 // It does not wait for their termination.
 func (r *Retryer) Stop() {
-	r.logger.Debug("retryer terminating", logfields.Event("retryer_terminating"))
+	r.logger.Debug("retryer terminating")
 
 	select {
 	case <-r.shutdownChan:

@@ -14,7 +14,6 @@ import (
 	"github.com/simplesurance/directorius/internal/cfg"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/jenkins"
-	"github.com/simplesurance/directorius/internal/logfields"
 	"github.com/simplesurance/directorius/internal/provider/github"
 	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
@@ -77,7 +76,6 @@ func startHTTPSServer(listenAddr, certFile, keyFile string, mux *http.ServeMux) 
 
 		logger.Debug(
 			"terminating https server",
-			logfields.Event("https_server_terminating"),
 			zap.Duration("shutdown_timeout", shutdownTimeout),
 		)
 
@@ -85,7 +83,6 @@ func startHTTPSServer(listenAddr, certFile, keyFile string, mux *http.ServeMux) 
 		if err != nil {
 			logger.Warn(
 				"shutting down https server failed",
-				logfields.Event("https_server_termination_failed"),
 				zap.Error(err),
 			)
 		}
@@ -96,19 +93,17 @@ func startHTTPSServer(listenAddr, certFile, keyFile string, mux *http.ServeMux) 
 
 		logger.Info(
 			"https server started",
-			logfields.Event("https_server_started"),
 			zap.String("listenAddr", listenAddr),
 		)
 
 		err := httpsServer.ListenAndServeTLS(certFile, keyFile)
 		if errors.Is(err, http.ErrServerClosed) {
-			logger.Info("https server terminated", logfields.Event("http_server_terminated"))
+			logger.Info("https server terminated")
 			return
 		}
 
 		logger.Fatal(
 			"https server terminated unexpectedly",
-			logfields.Event("https_server_terminated_unexpectedly"),
 			zap.Error(err),
 		)
 	}()
@@ -127,7 +122,6 @@ func startHTTPServer(listenAddr string, mux *http.ServeMux) {
 
 		logger.Debug(
 			"terminating http server",
-			logfields.Event("http_server_terminating"),
 			zap.Duration("shutdown_timeout", shutdownTimeout),
 		)
 
@@ -135,7 +129,6 @@ func startHTTPServer(listenAddr string, mux *http.ServeMux) {
 		if err != nil {
 			logger.Warn(
 				"shutting down http server failed",
-				logfields.Event("http_server_termination_failed"),
 				zap.Error(err),
 			)
 		}
@@ -146,19 +139,17 @@ func startHTTPServer(listenAddr string, mux *http.ServeMux) {
 
 		logger.Info(
 			"http server started",
-			logfields.Event("http_server_started"),
 			zap.String("listenAddr", listenAddr),
 		)
 
 		err := httpServer.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
-			logger.Info("http server terminated", logfields.Event("http_server_terminated"))
+			logger.Info("http server terminated")
 			return
 		}
 
 		logger.Fatal(
 			"http server terminated unexpectedly",
-			logfields.Event("http_server_terminated_unexpectedly"),
 			zap.Error(err),
 		)
 	}()
@@ -371,7 +362,6 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, 
 	if err := autoupdater.InitSync(ctx); err != nil {
 		logger.Error(
 			"autoupdater: initial synchronization failed",
-			logfields.Event("autoupdate_initial_sync_failed"),
 			zap.Error(err),
 		)
 	}
@@ -382,7 +372,6 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, 
 		autoupdater.HTTPService().RegisterHandlers(mux, config.WebInterfaceEndpoint)
 		logger.Info(
 			"registered github pull request autoupdater http endpoint",
-			logfields.Event("autoupdater_http_handler_registered"),
 			zap.String("endpoint", config.WebInterfaceEndpoint),
 		)
 	}
@@ -439,7 +428,6 @@ func main() {
 	mustInitLogger(config)
 
 	logger.Info("loaded cfg file",
-		logfields.Event("cfg_loaded"),
 		zap.String("cfg_file", *args.ConfigFile),
 		zap.String("http_server_listen_addr", config.HTTPListenAddr),
 		zap.String("https_server_listen_addr", config.HTTPSListenAddr),
@@ -476,7 +464,6 @@ func main() {
 	mux.HandleFunc(config.HTTPGithubWebhookEndpoint, gh.HTTPHandler)
 	logger.Info(
 		"registered github webhook event http endpoint",
-		logfields.Event("github_http_handler_registered"),
 		zap.String("endpoint", config.HTTPGithubWebhookEndpoint),
 	)
 
@@ -484,7 +471,6 @@ func main() {
 		mux.Handle(config.PrometheusMetricsEndpoint, promhttp.Handler())
 		logger.Info(
 			"registered prometheus metrics http endpoint",
-			logfields.Event("prometheus_http_handler_registered"),
 			zap.String("endpoint", config.PrometheusMetricsEndpoint),
 		)
 	}
