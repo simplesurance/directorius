@@ -49,13 +49,13 @@ queue_pr_head_label = "autoupdater-first"
   basic_auth.password = "hammer"
 
   [[ci.job]]
-    job = "job/check/{{ queryescape .Branch }}"
+    url_path = "job/check/{{ queryescape .Branch }}"
 
   [[ci.job]]
-    job = "job/build/{{ queryescape .PullRequestNr }}"
+    url_path = "job/build/{{ queryescape .PullRequestNr }}"
 
   [[ci.job]]
-    job = "job/test/"
+    url_path = "job/test/"
 
     [ci.job.parameters]
       branch = "{{ .Branch }}"

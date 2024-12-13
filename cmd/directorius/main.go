@@ -336,7 +336,7 @@ func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdater.CI {
 	}
 	for _, job := range cfg.Jobs {
 		result.Jobs = append(result.Jobs, &jenkins.JobTemplate{
-			RelURL:     job.Job,
+			RelURL:     job.URLPath,
 			Parameters: job.Parameters,
 		})
 	}
