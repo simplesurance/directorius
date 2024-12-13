@@ -81,7 +81,7 @@ func (r *Retryer) Run(ctx context.Context, fn func(context.Context) error, logF 
 			return ctx.Err()
 
 		case <-retryTimer.C:
-			logger = logger.With(zap.Uint("try_count", tryCnt))
+			logger := logger.With(zap.Uint("try_count", tryCnt))
 
 			logger.Debug(
 				"running action",
