@@ -82,7 +82,9 @@ func (s *Client) GetBuildURL(ctx context.Context, queueItemID int64) (string, er
 	case "":
 		return "", fmt.Errorf("unmarshalled queue item response contains an empty class value, response: %s", string(respBytes))
 
-	case "hudson.model.Queue$WaitingItem", "hudson.model.Queue$BlockedItem":
+	case "hudson.model.Queue$WaitingItem",
+		"hudson.model.Queue$BlockedItem",
+		"hudson.model.Queue$BuildableItem":
 		return "", goorderr.NewRetryableAnytimeError(ErrBuildScheduled)
 
 	case "hudson.model.Queue$LeftItem":
