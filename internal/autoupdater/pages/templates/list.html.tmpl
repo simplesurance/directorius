@@ -28,8 +28,7 @@
                 <th>Rank</th>
                 <th>Pull Request</th>
                 <th>Author</th>
-                <th>Enqueued Since</th>
-                <th>Not Suspended Since</th>
+                <th>In Mergequeue (Not Suspended)</th>
                 <th>Status</th>
               </tr>
                 {{ range $i, $pr := $queue.ActivePRs }}
@@ -41,8 +40,12 @@
                   <td>
                     <a href="https://github.com/{{ $pr.Author }}">{{ $pr.Author }}</a>
                   </td>
-                  <td>{{ since $pr.EnqueuedAt }}</td>
-                  <td>{{ since $pr.InActiveQueueSince }}</td>
+                  <td>
+                    {{ since $pr.EnqueuedAt }}
+                    {{ if ne (since $pr.EnqueuedAt) (since $pr.InActiveQueueSince) }}
+                     ({{ since $pr.InActiveQueueSince }})
+                    {{ end }}
+                   </td>
                   {{ if eq $i 0 }}
                     <td id="td_status_updating">Updating</td>
                   {{ else }}
