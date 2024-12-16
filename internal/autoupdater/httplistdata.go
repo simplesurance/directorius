@@ -46,13 +46,13 @@ func (a *Autoupdater) httpListData() *httpListData {
 	result.PeriodicTriggerInterval = a.periodicTriggerIntv
 	result.ProcessedEvents = a.processedEventCnt.Load()
 
-	if a.Config.CI == nil {
+	if a.CI == nil {
 		result.CIServer = "undefined"
 	} else {
-		result.CIServer = a.Config.CI.Client.String()
+		result.CIServer = a.CI.Client.String()
 	}
 
-	for _, j := range a.Config.CI.Jobs {
+	for _, j := range a.CI.Jobs {
 		result.CIJobURLs = append(result.CIJobURLs, j.RelURL)
 	}
 
