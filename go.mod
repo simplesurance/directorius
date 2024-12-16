@@ -7,7 +7,7 @@ require (
 	github.com/google/go-github/v67 v67.0.0
 	github.com/pelletier/go-toml v1.9.5
 	github.com/prometheus/client_golang v1.20.5
-	github.com/shurcooL/githubv4 v0.0.0-20220115235240-a14260e6f8a2
+	github.com/shurcooL/githubv4 v0.0.0-20240727222349-48295856cce7
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.9.0
 	github.com/sykesm/zap-logfmt v0.0.4
@@ -29,10 +29,9 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
-	github.com/shurcooL/graphql v0.0.0-20200928012149-18c5c3165e3a // indirect
+	github.com/shurcooL/graphql v0.0.0-20230722043721-ed46e5a46466 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/sys v0.22.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
