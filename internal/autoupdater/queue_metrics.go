@@ -63,8 +63,12 @@ func (q *queueMetrics) SuspendQueueSizeDec() {
 
 func queueSizeLabels(branchID *BranchID, state stateLabelVal) prometheus.Labels {
 	return prometheus.Labels{
-		repositoryLabel: fmt.Sprintf("%s/%s", branchID.RepositoryOwner, branchID.Repository),
+		repositoryLabel: repositoryLabelValue(branchID.RepositoryOwner, branchID.Repository),
 		baseBranchLabel: branchID.Branch,
 		stateLabel:      string(state),
 	}
+}
+
+func repositoryLabelValue(owner, repository string) string {
+	return owner + "/" + repository
 }

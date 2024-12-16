@@ -23,7 +23,11 @@ type PullRequest struct {
 	Link      string
 	LogFields []zap.Field
 
+	// InActiveQueueSince is the when the PR has been added to the active
+	// queue. When The PR is suspended and resumed it is reset.
 	InActiveQueueSince time.Time
+	// EnqueuedAt is the time when the was added to merge-queue
+	EnqueuedAt time.Time
 
 	// LastStartedCIBuilds keys are [jenkins.Build.jobName]
 	LastStartedCIBuilds map[string]*jenkins.Build
@@ -66,6 +70,7 @@ func NewPullRequest(nr int, branch, author, title, link string) (*PullRequest, e
 			logfields.Branch(branch),
 		},
 		LastStartedCIBuilds: map[string]*jenkins.Build{},
+		EnqueuedAt:          time.Now(),
 	}, nil
 }
 

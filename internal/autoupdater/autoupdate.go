@@ -453,7 +453,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			return
 		}
 
-		_, err = a.Dequeue(ctx, bb, pr.Number)
+		pr, err = a.Dequeue(ctx, bb, pr.Number)
 		if err != nil {
 			logError(
 				logger,
@@ -461,6 +461,9 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				err,
 			)
 			return
+		}
+		if ev.PullRequest.GetMerged() {
+			metrics.RecordTimeToMerge(time.Since(pr.EnqueuedAt), owner, repo)
 		}
 
 		var reason zap.Field

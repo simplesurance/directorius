@@ -1,7 +1,7 @@
 package autoupdater
 
 import (
-	"fmt"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -14,6 +14,7 @@ const (
 	queueOperationsMetricName = "queue_operations_total"
 	githubEventsMetricName    = "processed_github_events_total"
 	queuedPRCountMetricName   = "queued_prs_count"
+	timeToMergeMetricName     = "time_to_merge_seconds"
 )
 
 const (
@@ -42,6 +43,7 @@ type metricCollector struct {
 	queueOps        *prometheus.CounterVec
 	processedEvents prometheus.Counter
 	queueSize       *prometheus.GaugeVec
+	timeToMerge     *prometheus.SummaryVec
 }
 
 var metrics = newMetricCollector()
@@ -72,6 +74,14 @@ func newMetricCollector() *metricCollector {
 			},
 			[]string{repositoryLabel, baseBranchLabel, stateLabel},
 		),
+		timeToMerge: promauto.NewSummaryVec(
+			prometheus.SummaryOpts{
+				Namespace: metricNamespace,
+				Name:      timeToMergeMetricName,
+				Help:      "time from adding a pull request to the merge queue until it gets merged",
+			},
+			[]string{repositoryLabel},
+		),
 	}
 }
 
@@ -84,7 +94,7 @@ func (m *metricCollector) logGetMetricFailed(metricName string, err error) {
 
 func enqueueOpsLabels(branchID *BranchID, operation operationLabelVal) prometheus.Labels {
 	return prometheus.Labels{
-		repositoryLabel: fmt.Sprintf("%s/%s", branchID.RepositoryOwner, branchID.Repository),
+		repositoryLabel: repositoryLabelValue(branchID.RepositoryOwner, branchID.Repository),
 		baseBranchLabel: branchID.Branch,
 		operationLabel:  string(operation),
 	}
@@ -112,4 +122,17 @@ func (m *metricCollector) DequeueOpsInc(baseBranchID *BranchID) {
 
 func (m *metricCollector) ProcessedEventsInc() {
 	m.processedEvents.Inc()
+}
+
+func (m *metricCollector) RecordTimeToMerge(d time.Duration, repositoryOwner, repository string) {
+	s, err := m.timeToMerge.GetMetricWith(
+		prometheus.Labels{repositoryLabel: repositoryLabelValue(
+			repositoryLabel, repositoryLabelValue(repositoryOwner, repository),
+		)})
+	if err != nil {
+		m.logGetMetricFailed(timeToMergeMetricName, err)
+		return
+	}
+
+	s.Observe(d.Seconds())
 }
