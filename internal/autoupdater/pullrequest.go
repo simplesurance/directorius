@@ -23,7 +23,7 @@ type PullRequest struct {
 	Link      string
 	LogFields []zap.Field
 
-	EnqueuedSince time.Time
+	InActiveQueueSince time.Time
 
 	// LastStartedCIBuilds keys are [jenkins.Build.jobName]
 	LastStartedCIBuilds map[string]*jenkins.Build

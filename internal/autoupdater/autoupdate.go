@@ -922,7 +922,7 @@ func (a *Autoupdater) Enqueue(_ context.Context, baseBranch *BaseBranch, pr *Pul
 
 // Dequeue removes the pull request with number prNumber from the autoupdate queue of baseBranch.
 // This disables keeping the pull request update with baseBranch.
-// If no pull request is queued with prNumber a ErrNotFound error is returned.
+// If no pull request is queued with prNumber an ErrNotFound error is returned.
 //
 // If the pull request was the only element in the baseBranch queue, the queue is removed.
 func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumber int) (*PullRequest, error) {
