@@ -38,7 +38,9 @@
                   <td>
                     <a href="{{ $pr.Link }} ">{{ $pr.Title }} (#{{ $pr.Number }})</a>
                   </td>
-                  <td>{{ $pr.Author}}</td>
+                  <td>
+                    <a href="https://github.com/{{ $pr.Author }}">{{ $pr.Author }}</a>
+                  </td>
                   <td>{{ since $pr.EnqueuedAt }}</td>
                   <td>{{ since $pr.InActiveQueueSince }}</td>
                   {{ if eq $i 0 }}
