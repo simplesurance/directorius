@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/go-github/v59/github"
+	"github.com/google/go-github/v67/github"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 

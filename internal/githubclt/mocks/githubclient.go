@@ -12,7 +12,7 @@ package mocks
 import (
 	reflect "reflect"
 
-	github "github.com/google/go-github/v59/github"
+	github "github.com/google/go-github/v67/github"
 	gomock "go.uber.org/mock/gomock"
 )
 

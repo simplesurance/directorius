@@ -3,7 +3,7 @@ package github
 import (
 	"net/http"
 
-	"github.com/google/go-github/v59/github"
+	"github.com/google/go-github/v67/github"
 
 	"github.com/simplesurance/directorius/internal/logfields"
 
