@@ -27,7 +27,7 @@ log_time_key = "time_iso8601"
 log_level =  "info"
 
 # local http server endpoint under which a minimal webinterface is served
-webinterface_endpoint = "/autoupdater"
+webinterface_endpoint = "/"
 
 # enqueue/dequeue a pull request for autoupdates when one of the labels is added/removed
 trigger_labels = ["queue-add"]
