@@ -121,8 +121,8 @@ func ghBranchesAsStrings(branches []*github.Branch) []string {
 	return result
 }
 
-// isMonitoredRepositoriesitory returns true if the repository is listed in the a.monitoredRepos.
-func (a *Autoupdater) isMonitoredRepositoriesitory(owner, repositoryName string) bool {
+// isMonitoredRepository returns true if the repository is listed in the a.monitoredRepos.
+func (a *Autoupdater) isMonitoredRepository(owner, repositoryName string) bool {
 	repo := Repository{
 		OwnerLogin:     owner,
 		RepositoryName: repositoryName,
@@ -224,7 +224,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	switch ev := event.Event.(type) {
 	case *github.PullRequestEvent:
-		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for unmonitored repository",
 			)
@@ -235,7 +235,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processPullRequestEvent(ctx, logger, ev)
 
 	case *github.PushEvent:
-		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 			)
@@ -246,7 +246,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processPushEvent(ctx, logger, ev)
 
 	case *github.StatusEvent:
-		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 			)
@@ -257,7 +257,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processStatusEvent(ctx, logger, ev)
 
 	case *github.CheckRunEvent:
-		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 			)
@@ -267,7 +267,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 		a.processCheckRunEvent(ctx, logger, ev)
 
 	case *github.PullRequestReviewEvent:
-		if !a.isMonitoredRepositoriesitory(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
+		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug(
 				"event is for repository that is not monitored",
 			)
