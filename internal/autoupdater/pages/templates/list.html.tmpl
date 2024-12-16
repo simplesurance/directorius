@@ -69,7 +69,6 @@
       {{ end }}
     </div>
 
-
   <body>
     <div id="configuration">
       <section>
@@ -156,10 +155,10 @@
         <p>
           If a base-branch can not be merged into a pull request branch, a
           negative status check for a PR was reported, it is not approved or it
-          became stale, updates for the PR are suspended.<br>
+          became stale, updates and triggering CI checks for the PR are
+          suspended.<br>
           When the branch of the pull request or its base branch changes or its
-          combined check status is not negative anymore it is enqueued again for
-          being kept up to date.
+          combined check status is not negative anymore it is enqueued.
         </p>
       </section>
     </div>
