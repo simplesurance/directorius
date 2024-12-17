@@ -1,6 +1,7 @@
 package autoupdater
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -96,7 +97,7 @@ type queue struct {
 func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retryer Retryer, ci *CI, headLabel string) *queue {
 	q := queue{
 		baseBranch:               *base,
-		active:                   orderedmap.New[int, *PullRequest](),
+		active:                   orderedmap.New[int, *PullRequest](orderBefore),
 		suspended:                map[int]*PullRequest{},
 		logger:                   logger.Named("queue").With(base.Logfields...),
 		ghClient:                 ghClient,
@@ -208,7 +209,7 @@ func (q *queue) _enqueueActive(pr *PullRequest) error {
 	logger := q.logger.With(pr.LogFields...)
 
 	pr.InActiveQueueSince = time.Now()
-	newFirstElemen, added := q.active.EnqueueIfNotExist(pr.Number, pr)
+	newFirstElemen, added := q.active.InsertIfNotExist(pr.Number, pr)
 	if !added {
 		return fmt.Errorf("pull request already exist in active queue: %w", ErrAlreadyExists)
 	}
@@ -1086,4 +1087,26 @@ func (q *queue) getPullRequest(prNumber int) *PullRequest {
 	}
 
 	return q.active.Get(prNumber)
+}
+
+// orderBefore returns:
+//
+//	-1 if x should be processed before y
+//	 0 if x and y have the same order
+//	+1 if x should be processed after y.
+//
+// x should be processed before y when the first statement applies:
+//   - [PullRequest.Priority] is bigger.
+//   - The [PullRequest.EnqueuedAt] timestamp is older.
+//   - The [PullRequest.Number] timestamp is smaller.
+func orderBefore(x, y *PullRequest) int {
+	if r := cmp.Compare(y.Priority, x.Priority); r != 0 {
+		return r
+	}
+
+	if r := x.EnqueuedAt.Compare(y.EnqueuedAt); r != 0 {
+		return r
+	}
+
+	return cmp.Compare(x.Number, y.Number)
 }

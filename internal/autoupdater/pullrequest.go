@@ -32,6 +32,8 @@ type PullRequest struct {
 	// LastStartedCIBuilds keys are [jenkins.Build.jobName]
 	LastStartedCIBuilds map[string]*jenkins.Build
 
+	Priority int8
+
 	stateUnchangedSince time.Time
 	lock                sync.Mutex // must be held when accessing stateUnchangedSince
 }

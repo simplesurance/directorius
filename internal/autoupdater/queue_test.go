@@ -3,6 +3,7 @@ package autoupdater
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,7 @@ func TestUpdatePR_DoesNotCallBaseBranchUpdateIfPRIsNotApproved(t *testing.T) {
 	pr, err := NewPullRequest(1, "testbr", "fho", "test pr", "")
 	require.NoError(t, err)
 
-	_, added := q.active.EnqueueIfNotExist(pr.Number, pr)
+	_, added := q.active.InsertIfNotExist(pr.Number, pr)
 	require.True(t, added)
 
 	mockReadyForMergeStatus(
@@ -74,4 +75,76 @@ func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
 	assert.True(t, changed)
 	assert.Equal(t, headCommitID, headCommit)
 	q.Stop()
+}
+
+func TestActiveQueueOrder(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+
+	bb, err := NewBaseBranch(repoOwner, repo, "main")
+	require.NoError(t, err)
+	q := newQueue(bb, zap.L(), ghClient, retry.NewRetryer(), nil, "first")
+	t.Cleanup(q.Stop)
+
+	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, 1).AnyTimes()
+	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, 1).AnyTimes()
+
+	mockReadyForMergeStatus(
+		ghClient, 1,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+	).AnyTimes()
+	ghClient.EXPECT().UpdateBranch(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+
+	// must always stay the first in the queue
+	first, err := NewPullRequest(1, "testbr", "fho", "test pr", "")
+	require.NoError(t, err)
+	require.NoError(t, q.Enqueue(first))
+	require.True(t, q.isFirstActive(first))
+
+	// should always be second in the queue because it has the highest priority
+	prHighestPrio, err := NewPullRequest(100, "testbr", "fho", "test pr", "")
+	prHighestPrio.EnqueuedAt = prHighestPrio.EnqueuedAt.Add(24 * time.Hour)
+	prHighestPrio.Priority = 2
+	require.NoError(t, q.Enqueue(prHighestPrio))
+	require.NoError(t, err)
+	require.True(t, q.isFirstActive(first))
+
+	activePrs, _ := q.asSlices()
+	require.Equal(t, prHighestPrio, activePrs[1])
+
+	// should become third in the queue because of it's priority
+	prNegativePrio, err := NewPullRequest(3, "testbr", "fho", "test pr", "")
+	require.NoError(t, err)
+	prNegativePrio.Priority = -1
+	require.NoError(t, q.Enqueue(prNegativePrio))
+	require.True(t, q.isFirstActive(first))
+	activePrs, _ = q.asSlices()
+	require.Equal(t, prHighestPrio, activePrs[1])
+	require.Equal(t, prNegativePrio, activePrs[2])
+
+	// should swap places with prNegativePrio because it has a higher priority
+	prNeutralPrio, err := NewPullRequest(5, "testbr", "fho", "test pr", "")
+	require.NoError(t, err)
+	prNeutralPrio.Priority = 0
+	require.NoError(t, q.Enqueue(prNeutralPrio))
+	require.True(t, q.isFirstActive(first))
+	activePrs, _ = q.asSlices()
+	require.Equal(t, prHighestPrio, activePrs[1])
+	require.Equal(t, prNeutralPrio, activePrs[2])
+	require.Equal(t, prNegativePrio, activePrs[3])
+
+	// should swap places with prNeutralOld because it has an older EnqueuedAt timestamp
+	prNeutralOld, err := NewPullRequest(6, "testbr", "fho", "test pr", "")
+	require.NoError(t, err)
+	prNeutralOld.Priority = 0
+	prNeutralOld.EnqueuedAt = prNeutralOld.EnqueuedAt.Add(-24 * time.Hour)
+	require.NoError(t, q.Enqueue(prNeutralOld))
+	require.True(t, q.isFirstActive(first))
+	activePrs, _ = q.asSlices()
+	require.Equal(t, prHighestPrio, activePrs[1])
+	require.Equal(t, prNeutralOld, activePrs[2])
+	require.Equal(t, prNeutralPrio, activePrs[3])
+	require.Equal(t, prNegativePrio, activePrs[4])
 }
