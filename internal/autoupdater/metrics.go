@@ -33,11 +33,6 @@ const (
 
 type stateLabelVal string
 
-const (
-	stateLabelActiveVal    stateLabelVal = "active"
-	stateLabelSuspendedVal stateLabelVal = "suspended"
-)
-
 type metricCollector struct {
 	logger          *zap.Logger
 	queueOps        *prometheus.CounterVec

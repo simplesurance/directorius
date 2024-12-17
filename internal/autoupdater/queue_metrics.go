@@ -11,6 +11,11 @@ type queueMetrics struct {
 	suspendedQueueSize prometheus.Gauge
 }
 
+const (
+	stateLabelActiveVal    stateLabelVal = "active"
+	stateLabelSuspendedVal stateLabelVal = "suspended"
+)
+
 func newQueueMetrics(baseBranch BranchID) (*queueMetrics, error) {
 	result := queueMetrics{}
 
