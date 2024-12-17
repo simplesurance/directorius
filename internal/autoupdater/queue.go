@@ -914,7 +914,7 @@ func (q *queue) _activePRsByBranch(branches set.Set[string]) (
 	var result []*PullRequest
 	notFound = maps.Clone(branches)
 
-	q.active.Foreach(func(pr *PullRequest) bool {
+	q.active.Foreach()(func(pr *PullRequest) bool {
 		if branches.Contains(pr.Branch) {
 			result = append(result, pr)
 			delete(notFound, pr.Branch)
@@ -1023,7 +1023,7 @@ func (q *queue) Stop() {
 		_, _ = q._dequeueSuspended(prNumber)
 	}
 
-	q.active.Foreach(func(pr *PullRequest) bool {
+	q.active.Foreach()(func(pr *PullRequest) bool {
 		q._dequeueActive(pr.Number)
 		return true
 	})

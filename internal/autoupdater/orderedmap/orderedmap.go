@@ -1,6 +1,8 @@
 package orderedmap
 
 import (
+	"iter"
+
 	"github.com/simplesurance/directorius/internal/linkedlist"
 )
 
@@ -69,14 +71,9 @@ func (m *Map[K, V]) Len() int {
 	return m.order.Len()
 }
 
-// Foreach itereates through the map in order.
-// When fn returns false the iteration is aborted.
-func (m *Map[K, V]) Foreach(fn func(V) bool) {
-	for e := m.order.Front(); e != nil; e = e.Next() {
-		if !fn(e.Value) {
-			return
-		}
-	}
+// Foreach returns an ordered iterator over the values.
+func (m *Map[K, V]) Foreach() iter.Seq[V] {
+	return m.order.Foreach()
 }
 
 // AsSlice returns a new slice containing the elements of the orderedMap in
