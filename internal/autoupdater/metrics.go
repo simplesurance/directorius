@@ -70,7 +70,7 @@ func newMetricCollector() *metricCollector {
 			prometheus.GaugeOpts{
 				Namespace: metricNamespace,
 				Name:      queuedPRCountMetricName,
-				Help:      "count of processed github webhook events",
+				Help:      "number of pull requests in the mergequeue",
 			},
 			[]string{repositoryLabel, baseBranchLabel, stateLabel},
 		),
