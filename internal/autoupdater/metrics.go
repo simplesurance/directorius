@@ -78,7 +78,13 @@ func newMetricCollector() *metricCollector {
 			prometheus.SummaryOpts{
 				Namespace: metricNamespace,
 				Name:      timeToMergeMetricName,
-				Help:      "time from adding a pull request to the merge queue until it gets merged",
+				MaxAge:    24 * time.Hour,
+				Objectives: map[float64]float64{
+					0.5:  0.05,
+					0.9:  0.01,
+					0.99: 0.001,
+				},
+				Help: "time from adding a pull request to the merge queue until it gets merged",
 			},
 			[]string{repositoryLabel},
 		),
