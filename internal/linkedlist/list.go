@@ -6,6 +6,8 @@
 // It is modified version of container/list
 package linkedlist
 
+import "iter"
+
 // Element is an element of a linked list.
 type Element[T any] struct {
 	// Next and previous pointers in the doubly-linked list of elements.
@@ -51,6 +53,17 @@ func (l *List[T]) Init() *List[T] {
 	l.root.prev = &l.root
 	l.len = 0
 	return l
+}
+
+// Foreach returns an iterator over the values in the linked list.
+func (l *List[T]) Foreach() iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for e := l.Front(); e != nil; e = e.Next() {
+			if !yield(e.Value) {
+				return
+			}
+		}
+	}
 }
 
 // New returns an initialized list.
