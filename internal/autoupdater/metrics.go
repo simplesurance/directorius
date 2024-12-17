@@ -132,9 +132,7 @@ func (m *metricCollector) ProcessedEventsInc() {
 
 func (m *metricCollector) RecordTimeToMerge(d time.Duration, repositoryOwner, repository string) {
 	s, err := m.timeToMerge.GetMetricWith(
-		prometheus.Labels{repositoryLabel: repositoryLabelValue(
-			repositoryLabel, repositoryLabelValue(repositoryOwner, repository),
-		)})
+		prometheus.Labels{repositoryLabel: repositoryLabelValue(repositoryOwner, repository)})
 	if err != nil {
 		m.logGetMetricFailed(timeToMergeMetricName, err)
 		return
