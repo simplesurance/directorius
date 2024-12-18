@@ -26,7 +26,6 @@
             <table class="queue_table">
               <tr>
                 <th>Rank</th>
-                <th>Priority</th>
                 <th>Pull Request</th>
                 <th>Author</th>
                 <th>In Mergequeue (Not Suspended)</th>
@@ -35,8 +34,7 @@
               </tr>
                 {{ range $i, $pr := $queue.ActivePRs }}
                   <tr class="tr_active_prs">
-                  <td>{{ add $i 1 }}</td>
-                  <td>{{ $pr.Priority  }}</td>
+                  <td >{{ add $i 1 }}</td>
                   <td>
                     <a href="{{ $pr.Link }} ">{{ $pr.Title }} (#{{ $pr.Number }})</a>
                   </td>
@@ -60,7 +58,6 @@
               {{ range $i, $pr := $queue.SuspendedPRs }}
                 <tr class="tr_suspended_prs">
                   <td></td>
-                  <td>{{ $pr.Priority  }}</td>
                   <td>
                     <a href="{{ $pr.Link }} ">{{ $pr.Title }} (#{{ $pr.Number }})</a>
                   </td>
