@@ -29,6 +29,7 @@
                 <th>Pull Request</th>
                 <th>Author</th>
                 <th>In Mergequeue (Not Suspended)</th>
+                <th>Suspensions</th>
                 <th>Status</th>
               </tr>
                 {{ range $i, $pr := $queue.ActivePRs }}
@@ -46,6 +47,7 @@
                      ({{ since $pr.InActiveQueueSince }})
                     {{ end }}
                    </td>
+                  <td>{{ $pr.SuspendCount.Load }}</td>
                   {{ if eq $i 0 }}
                     <td id="td_status_updating">Updating</td>
                   {{ else }}
@@ -61,6 +63,7 @@
                   </td>
                   <td>{{ $pr.Author}}</td>
                   <td></td>
+                  <td>{{ $pr.SuspendCount.Load }}</td>
                   <td class="td_status_suspended">Suspended</td>
                 </tr>
               {{ end }}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -26,13 +27,17 @@ type PullRequest struct {
 	// InActiveQueueSince is the when the PR has been added to the active
 	// queue. When The PR is suspended and resumed it is reset.
 	InActiveQueueSince time.Time
-	// EnqueuedAt is the time when the was added to merge-queue
+	// EnqueuedAt is the time when the PR is added to merge-queue
 	EnqueuedAt time.Time
 
 	// LastStartedCIBuilds keys are [jenkins.Build.jobName]
 	LastStartedCIBuilds map[string]*jenkins.Build
 
 	Priority int8
+
+	// SuspendCount is increased whenever a PR is moved from the active to
+	// the suspend queue.
+	SuspendCount atomic.Uint32
 
 	stateUnchangedSince time.Time
 	lock                sync.Mutex // must be held when accessing stateUnchangedSince

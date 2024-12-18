@@ -239,7 +239,7 @@ func (q *queue) Enqueue(pr *PullRequest) error {
 	defer q.lock.Unlock()
 
 	if _, exist := q.suspended[pr.Number]; exist {
-		return fmt.Errorf("pull request already exist in suspended queue: %w", ErrAlreadyExists)
+		return fmt.Errorf("pull request already exist in suspend queue: %w", ErrAlreadyExists)
 	}
 
 	return q._enqueueActive(pr)
@@ -335,6 +335,7 @@ func (q *queue) Suspend(prNumber int) error {
 	if pr == nil {
 		return fmt.Errorf("pr not in active queue: %w", ErrNotFound)
 	}
+	pr.SuspendCount.Add(1)
 
 	if _, exist := q.suspended[prNumber]; exist {
 		q.logger.DPanic("pr was in active and suspend queue, removed it from active queue")
