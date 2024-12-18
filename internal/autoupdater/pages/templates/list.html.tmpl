@@ -34,13 +34,9 @@
               </tr>
                 {{ range $i, $pr := $queue.ActivePRs }}
                   <tr class="tr_active_prs">
-                  <td >{{ add $i 1 }}</td>
-                  <td>
-                    <a href="{{ $pr.Link }} ">{{ $pr.Title }} (#{{ $pr.Number }})</a>
-                  </td>
-                  <td>
-                    <a href="https://github.com/{{ $pr.Author }}">{{ $pr.Author }}</a>
-                  </td>
+                  <td>{{ add $i 1 }}</td>
+                  <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
+                  <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
                   <td>
                     {{ since $pr.EnqueuedAt }}
                     {{ if ne (since $pr.EnqueuedAt) (since $pr.InActiveQueueSince) }}
