@@ -105,7 +105,7 @@ func TestActiveQueueOrder(t *testing.T) {
 
 	prHighPrio, err := NewPullRequest(100, "testbr", "fho", "test pr", "")
 	prHighPrio.EnqueuedAt = prHighPrio.EnqueuedAt.Add(24 * time.Hour)
-	prHighPrio.Priority = 2
+	prHighPrio.Priority.Store(2)
 	prHighPrio.SuspendCount.Store(3)
 	require.NoError(t, q.Enqueue(prHighPrio))
 	require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestActiveQueueOrder(t *testing.T) {
 	// should become third in the queue because of it's priority
 	prNegativePrio, err := NewPullRequest(3, "testbr", "fho", "test pr", "")
 	require.NoError(t, err)
-	prNegativePrio.Priority = -1
+	prNegativePrio.Priority.Store(-1)
 	require.NoError(t, q.Enqueue(prNegativePrio))
 	require.True(t, q.isFirstActive(first))
 	activePrs, _ = q.asSlices()
@@ -126,7 +126,7 @@ func TestActiveQueueOrder(t *testing.T) {
 	// should swap places with prNegativePrio because it has a higher priority
 	prNeutralPrio, err := NewPullRequest(5, "testbr", "fho", "test pr", "")
 	require.NoError(t, err)
-	prNeutralPrio.Priority = 0
+	prNeutralPrio.Priority.Store(0)
 	require.NoError(t, q.Enqueue(prNeutralPrio))
 	require.True(t, q.isFirstActive(first))
 	activePrs, _ = q.asSlices()
@@ -137,7 +137,7 @@ func TestActiveQueueOrder(t *testing.T) {
 	// should swap places with prHighestPrio because it has an older EnqueuedAt timestamp
 	prNeutralOld, err := NewPullRequest(6, "testbr", "fho", "test pr", "")
 	require.NoError(t, err)
-	prNeutralOld.Priority = 0
+	prNeutralOld.Priority.Store(0)
 	prNeutralOld.EnqueuedAt = prNeutralOld.EnqueuedAt.Add(-24 * time.Hour)
 	require.NoError(t, q.Enqueue(prNeutralOld))
 	require.True(t, q.isFirstActive(first))
@@ -150,7 +150,7 @@ func TestActiveQueueOrder(t *testing.T) {
 	// should swap places with prHighPrio because it's SuspendCount is lower
 	prHighPrio1S, err := NewPullRequest(200, "testbr", "fho", "test pr", "")
 	prHighPrio1S.EnqueuedAt = prHighPrio.EnqueuedAt.Add(24 * time.Hour)
-	prHighPrio1S.Priority = 2
+	prHighPrio1S.Priority.Store(2)
 	prHighPrio1S.SuspendCount.Store(1)
 	require.NoError(t, q.Enqueue(prHighPrio1S))
 	require.NoError(t, err)
