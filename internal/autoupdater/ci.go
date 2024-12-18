@@ -17,6 +17,7 @@ import (
 // [pr.LastStartedCIBuilds] is overwritten with the URLs of all started builds.
 func (c *CI) RunAll(ctx context.Context, retryer Retryer, pr *PullRequest) error {
 	var errs []error
+
 	ch := make(chan *runCiResult, len(c.Jobs))
 
 	for _, jobTempl := range c.Jobs {

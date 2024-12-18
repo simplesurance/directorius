@@ -74,6 +74,13 @@ func mockSuccessfulGithubUpdateBranchCall(clt *mocks.MockGithubClient, expectedP
 		Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID, Changed: branchChanged}, nil)
 }
 
+func mockSuccessfulGithubUpdateBranchCallAnyPR(clt *mocks.MockGithubClient, branchChanged bool) *gomock.Call {
+	return clt.
+		EXPECT().
+		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
+		Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID, Changed: branchChanged}, nil)
+}
+
 func mockFailedGithubUpdateBranchCall(clt *mocks.MockGithubClient, expectedPRNr int) *gomock.Call {
 	return clt.
 		EXPECT().

@@ -1098,10 +1098,14 @@ func (q *queue) getPullRequest(prNumber int) *PullRequest {
 //
 // x should be processed before y when the first statement applies:
 //   - [PullRequest.Priority] is bigger.
+//   - [PullRequest.SuspendCount] is smaller.
 //   - The [PullRequest.EnqueuedAt] timestamp is older.
 //   - The [PullRequest.Number] timestamp is smaller.
 func orderBefore(x, y *PullRequest) int {
 	if r := cmp.Compare(y.Priority, x.Priority); r != 0 {
+		return r
+	}
+	if r := cmp.Compare(x.SuspendCount.Load(), y.SuspendCount.Load()); r != 0 {
 		return r
 	}
 

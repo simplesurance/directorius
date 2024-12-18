@@ -85,7 +85,7 @@ func TestActiveQueueOrder(t *testing.T) {
 
 	bb, err := NewBaseBranch(repoOwner, repo, "main")
 	require.NoError(t, err)
-	q := newQueue(bb, zap.L(), ghClient, retry.NewRetryer(), nil, "first")
+	q := newQueue(bb, zap.L(), ghClient, retry.NewRetryer(), &CI{}, "first")
 	t.Cleanup(q.Stop)
 
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, 1).AnyTimes()
@@ -95,7 +95,7 @@ func TestActiveQueueOrder(t *testing.T) {
 		ghClient, 1,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).AnyTimes()
-	ghClient.EXPECT().UpdateBranch(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	mockSuccessfulGithubUpdateBranchCallAnyPR(ghClient, false).AnyTimes()
 
 	// must always stay the first in the queue
 	first, err := NewPullRequest(1, "testbr", "fho", "test pr", "")
@@ -103,16 +103,15 @@ func TestActiveQueueOrder(t *testing.T) {
 	require.NoError(t, q.Enqueue(first))
 	require.True(t, q.isFirstActive(first))
 
-	// should always be second in the queue because it has the highest priority
-	prHighestPrio, err := NewPullRequest(100, "testbr", "fho", "test pr", "")
-	prHighestPrio.EnqueuedAt = prHighestPrio.EnqueuedAt.Add(24 * time.Hour)
-	prHighestPrio.Priority = 2
-	require.NoError(t, q.Enqueue(prHighestPrio))
+	prHighPrio, err := NewPullRequest(100, "testbr", "fho", "test pr", "")
+	prHighPrio.EnqueuedAt = prHighPrio.EnqueuedAt.Add(24 * time.Hour)
+	prHighPrio.Priority = 2
+	prHighPrio.SuspendCount.Store(3)
+	require.NoError(t, q.Enqueue(prHighPrio))
 	require.NoError(t, err)
 	require.True(t, q.isFirstActive(first))
-
 	activePrs, _ := q.asSlices()
-	require.Equal(t, prHighestPrio, activePrs[1])
+	require.Equal(t, prHighPrio, activePrs[1])
 
 	// should become third in the queue because of it's priority
 	prNegativePrio, err := NewPullRequest(3, "testbr", "fho", "test pr", "")
@@ -121,7 +120,7 @@ func TestActiveQueueOrder(t *testing.T) {
 	require.NoError(t, q.Enqueue(prNegativePrio))
 	require.True(t, q.isFirstActive(first))
 	activePrs, _ = q.asSlices()
-	require.Equal(t, prHighestPrio, activePrs[1])
+	require.Equal(t, prHighPrio, activePrs[1])
 	require.Equal(t, prNegativePrio, activePrs[2])
 
 	// should swap places with prNegativePrio because it has a higher priority
@@ -131,11 +130,11 @@ func TestActiveQueueOrder(t *testing.T) {
 	require.NoError(t, q.Enqueue(prNeutralPrio))
 	require.True(t, q.isFirstActive(first))
 	activePrs, _ = q.asSlices()
-	require.Equal(t, prHighestPrio, activePrs[1])
+	require.Equal(t, prHighPrio, activePrs[1])
 	require.Equal(t, prNeutralPrio, activePrs[2])
 	require.Equal(t, prNegativePrio, activePrs[3])
 
-	// should swap places with prNeutralOld because it has an older EnqueuedAt timestamp
+	// should swap places with prHighestPrio because it has an older EnqueuedAt timestamp
 	prNeutralOld, err := NewPullRequest(6, "testbr", "fho", "test pr", "")
 	require.NoError(t, err)
 	prNeutralOld.Priority = 0
@@ -143,8 +142,22 @@ func TestActiveQueueOrder(t *testing.T) {
 	require.NoError(t, q.Enqueue(prNeutralOld))
 	require.True(t, q.isFirstActive(first))
 	activePrs, _ = q.asSlices()
-	require.Equal(t, prHighestPrio, activePrs[1])
+	require.Equal(t, prHighPrio, activePrs[1])
 	require.Equal(t, prNeutralOld, activePrs[2])
 	require.Equal(t, prNeutralPrio, activePrs[3])
 	require.Equal(t, prNegativePrio, activePrs[4])
+
+	// should swap places with prHighPrio because it's SuspendCount is lower
+	prHighPrio1S, err := NewPullRequest(200, "testbr", "fho", "test pr", "")
+	prHighPrio1S.EnqueuedAt = prHighPrio.EnqueuedAt.Add(24 * time.Hour)
+	prHighPrio1S.Priority = 2
+	prHighPrio1S.SuspendCount.Store(1)
+	require.NoError(t, q.Enqueue(prHighPrio1S))
+	require.NoError(t, err)
+	activePrs, _ = q.asSlices()
+	require.Equal(t, prHighPrio1S, activePrs[1])
+	require.Equal(t, prHighPrio, activePrs[2])
+	require.Equal(t, prNeutralOld, activePrs[3])
+	require.Equal(t, prNeutralPrio, activePrs[4])
+	require.Equal(t, prNegativePrio, activePrs[5])
 }
