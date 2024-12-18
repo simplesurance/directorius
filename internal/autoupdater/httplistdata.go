@@ -67,11 +67,11 @@ func toPagesPullRequest(pr *PullRequest, isFirst bool) *types.PullRequest {
 	return &types.PullRequest{
 		Priority: types.PRPriorityOptions(int32(pr.Priority.Load())),
 		Link: &types.Link{
-			Name: fmt.Sprintf("%s (#%d)", pr.Title, pr.Number),
+			Text: fmt.Sprintf("%s (#%d)", pr.Title, pr.Number),
 			URL:  pr.Link,
 		},
 		Author: &types.Link{
-			Name: pr.Author,
+			Text: pr.Author,
 			URL:  urlJoin("https://github.com", pr.Author),
 		},
 		EnqueuedSince:      types.TimeSince(pr.EnqueuedAt),

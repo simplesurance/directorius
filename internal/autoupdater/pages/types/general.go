@@ -3,7 +3,7 @@ package types
 import "time"
 
 type Link struct {
-	Name string
+	Text string
 	URL  string
 }
 
