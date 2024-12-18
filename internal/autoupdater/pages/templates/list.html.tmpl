@@ -54,12 +54,10 @@
               {{ range $i, $pr := $queue.SuspendedPRs }}
                 <tr class="tr_suspended_prs">
                   <td></td>
-                  <td>
-                    <a href="{{ $pr.Link }} ">{{ $pr.Title }} (#{{ $pr.Number }})</a>
-                  </td>
-                  <td>{{ $pr.Author}}</td>
-                  <td>{{ since $pr.EnqueuedAt }}</td>
-                  <td>{{ $pr.SuspendCount.Load }}</td>
+                  <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
+                  <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
+                  <td>{{ $pr.EnqueuedSince }}</td>
+                  <td>{{ $pr.Suspensions }}</td>
                   <td class="td_status_suspended">Suspended</td>
                 </tr>
               {{ end }}
