@@ -1102,7 +1102,7 @@ func (q *queue) getPullRequest(prNumber int) *PullRequest {
 //   - The [PullRequest.EnqueuedAt] timestamp is older.
 //   - The [PullRequest.Number] timestamp is smaller.
 func orderBefore(x, y *PullRequest) int {
-	if r := cmp.Compare(y.Priority, x.Priority); r != 0 {
+	if r := cmp.Compare(y.Priority.Load(), x.Priority.Load()); r != 0 {
 		return r
 	}
 	if r := cmp.Compare(x.SuspendCount.Load(), y.SuspendCount.Load()); r != 0 {

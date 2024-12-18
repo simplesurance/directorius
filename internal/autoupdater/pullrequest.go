@@ -33,7 +33,7 @@ type PullRequest struct {
 	// LastStartedCIBuilds keys are [jenkins.Build.jobName]
 	LastStartedCIBuilds map[string]*jenkins.Build
 
-	Priority int8
+	Priority atomic.Uint32
 
 	// SuspendCount is increased whenever a PR is moved from the active to
 	// the suspend queue.
