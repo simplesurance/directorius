@@ -24,9 +24,9 @@ type PullRequest struct {
 	Link      string
 	LogFields []zap.Field
 
-	// InActiveQueueSince is the when the PR has been added to the active
+	// inActiveQueueSince is the when the PR has been added to the active
 	// queue. When The PR is suspended and resumed it is reset.
-	InActiveQueueSince time.Time
+	inActiveQueueSince atomic.Pointer[time.Time]
 	// EnqueuedAt is the time when the PR is added to merge-queue
 	EnqueuedAt time.Time
 
@@ -66,7 +66,7 @@ func NewPullRequest(nr int, branch, author, title, link string) (*PullRequest, e
 		return nil, errors.New("branch is empty")
 	}
 
-	return &PullRequest{
+	pr := PullRequest{
 		Number: nr,
 		Branch: branch,
 		Author: author,
@@ -78,7 +78,11 @@ func NewPullRequest(nr int, branch, author, title, link string) (*PullRequest, e
 		},
 		LastStartedCIBuilds: map[string]*jenkins.Build{},
 		EnqueuedAt:          time.Now(),
-	}, nil
+		inActiveQueueSince:  atomic.Pointer[time.Time]{},
+	}
+	pr.inActiveQueueSince.Store(&time.Time{})
+
+	return &pr, nil
 }
 
 // Equal returns true if p and other are of type PullRequest and its Number
@@ -161,4 +165,16 @@ func (p *PullRequest) FailedCIStatusIsForNewestBuild(logger *zap.Logger, statuse
 	}
 
 	return false, nil
+}
+
+// SetInActiveQueueSince sets the inActiveQueueSince to [time.Now()].
+func (p *PullRequest) SetInActiveQueueSince() {
+	n := time.Now()
+	p.inActiveQueueSince.Store(&n)
+}
+
+// InActiveQueueSince returns since when the PR has been in the active queue.
+// If it isn't in the active queue the zero value is returned.
+func (p *PullRequest) InActiveQueueSince() time.Time {
+	return *p.inActiveQueueSince.Load()
 }

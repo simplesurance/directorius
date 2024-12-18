@@ -208,7 +208,7 @@ func (q *queue) asSlices() (activePRs, suspendedPRs []*PullRequest) {
 func (q *queue) _enqueueActive(pr *PullRequest) error {
 	logger := q.logger.With(pr.LogFields...)
 
-	pr.InActiveQueueSince = time.Now()
+	pr.SetInActiveQueueSince()
 	newFirstElemen, added := q.active.InsertIfNotExist(pr.Number, pr)
 	if !added {
 		return fmt.Errorf("pull request already exist in active queue: %w", ErrAlreadyExists)
