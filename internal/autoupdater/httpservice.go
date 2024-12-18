@@ -5,7 +5,6 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
-	"time"
 
 	_ "embed" // used to embed html templates and static docs
 
@@ -23,9 +22,6 @@ var staticFS embed.FS
 var templFuncs = template.FuncMap{
 	"add": func(a, b int) int {
 		return a + b
-	},
-	"since": func(ts time.Time) string {
-		return time.Since(ts).Round(time.Second).String()
 	},
 }
 

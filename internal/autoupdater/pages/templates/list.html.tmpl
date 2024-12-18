@@ -7,9 +7,8 @@
     <h1>Autoupdater Overview</h1>
   </head>
 
-    <header>
-      <h2>Queues</h2>
-    </header>
+    <header><h2>Queues</h2></header>
+
     <div id="queue_content">
       {{ if not .Queues }}
         <section>
@@ -34,36 +33,30 @@
               </tr>
                 {{ range $i, $pr := $queue.ActivePRs }}
                   <tr class="tr_active_prs">
-                  <td >{{ add $i 1 }}</td>
+                  <td>{{ add $i 1 }}</td>
+                  <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
+                  <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
                   <td>
-                    <a href="{{ $pr.Link }} ">{{ $pr.Title }} (#{{ $pr.Number }})</a>
-                  </td>
-                  <td>
-                    <a href="https://github.com/{{ $pr.Author }}">{{ $pr.Author }}</a>
-                  </td>
-                  <td>
-                    {{ since $pr.EnqueuedAt }}
-                    {{ if ne (since $pr.EnqueuedAt) (since $pr.InActiveQueueSince) }}
-                     ({{ since $pr.InActiveQueueSince }})
+                    {{ $pr.EnqueuedSince }}
+                    {{ if $pr.InActiveQueueSince }}
+                      ({{ $pr.InActiveQueueSince }})
                     {{ end }}
-                   </td>
-                  <td>{{ $pr.SuspendCount.Load }}</td>
+                  </td>
+                  <td>{{ $pr.Suspensions }}</td>
                   {{ if eq $i 0 }}
-                    <td id="td_status_updating">Updating</td>
+                    <td id="td_status_updating">{{ $pr.Status }}</td>
                   {{ else }}
-                    <td class="td_status_queued">Queued</td>
+                    <td class="td_status_queued">{{ $pr.Status }}</td>
                   {{ end }}
                 </tr>
               {{ end }}
               {{ range $i, $pr := $queue.SuspendedPRs }}
                 <tr class="tr_suspended_prs">
                   <td></td>
-                  <td>
-                    <a href="{{ $pr.Link }} ">{{ $pr.Title }} (#{{ $pr.Number }})</a>
-                  </td>
-                  <td>{{ $pr.Author}}</td>
-                  <td>{{ since $pr.EnqueuedAt }}</td>
-                  <td>{{ $pr.SuspendCount.Load }}</td>
+                  <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
+                  <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
+                  <td>{{ $pr.EnqueuedSince }}</td>
+                  <td>{{ $pr.Suspensions }}</td>
                   <td class="td_status_suspended">Suspended</td>
                 </tr>
               {{ end }}
