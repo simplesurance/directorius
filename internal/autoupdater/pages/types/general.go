@@ -17,5 +17,5 @@ func TimeSince(t time.Time) string {
 		return ""
 	}
 
-	return time.Since(t).Round(time.Minute).String()
+	return time.Since(t).Round(time.Second).String()
 }
