@@ -76,6 +76,15 @@ func (r *Repository) String() string {
 	return fmt.Sprintf("%s/%s", r.OwnerLogin, r.RepositoryName)
 }
 
+type PRPriorityUpdates struct {
+	BranchID BranchID
+	Updates  []*PRPriorityUpdate
+}
+type PRPriorityUpdate struct {
+	PRNumber int
+	Priority int32
+}
+
 // NewAutoupdater creates an Autoupdater instance.
 // Only webhook events for repositories listed in monitoredRepositories are processed.
 // At least one trigger (triggerOnAutomerge or a label in triggerLabels) must
@@ -1182,6 +1191,23 @@ func (a *Autoupdater) Stop() {
 	a.Logger.Debug("autoupdater terminated")
 }
 
-func (a *Autoupdater) HTTPService() *HTTPService {
-	return NewHTTPService(a)
+func (a *Autoupdater) SetPullRequestPriorities(priorities *PRPriorityUpdates) {
+	a.queuesLock.Lock()
+	defer a.queuesLock.Unlock()
+	q, exists := a.queues[priorities.BranchID]
+	if !exists {
+		return
+	}
+
+	var changes int
+	for _, update := range priorities.Updates {
+		err := q.SetPullRequestPriority(update.PRNumber, update.Priority)
+		if err == nil {
+			changes++
+		}
+	}
+
+	if changes > 0 {
+		q.SortActiveQueue()
+	}
 }

@@ -231,6 +231,31 @@ func (q *queue) _enqueueActive(pr *PullRequest) error {
 	return nil
 }
 
+func (q *queue) SortActiveQueue() {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	if q.active.Len() == 0 {
+		return
+	}
+
+	firstElemNr := q.active.First().Number
+	q.active.SortByKey(func(a, b int) int {
+		prA := q.active.Get(a)
+
+		// never change the position of the first PR in the queue:
+		if a == firstElemNr {
+			return -1
+		}
+		if b == firstElemNr {
+			return 1
+		}
+
+		prB := q.active.Get(b)
+		return orderBefore(prA, prB)
+	})
+}
+
 // Enqueue appends a pull request to the active queue.
 // If it is the only element in the queue, the update operation is run for it.
 // If it already exist, ErrAlreadyExists is returned.
@@ -1088,6 +1113,20 @@ func (q *queue) getPullRequest(prNumber int) *PullRequest {
 	}
 
 	return q.active.Get(prNumber)
+}
+
+func (q *queue) SetPullRequestPriority(prNumber int, priority int32) error {
+	pr := q.getPullRequest(prNumber)
+	if pr == nil {
+		return ErrNotFound
+	}
+
+	pr.Priority.Store(priority)
+	q.logger.Info("set pull request priority",
+		logfields.NewWith(pr.LogFields, zap.Int32("priority", priority))...,
+	)
+
+	return nil
 }
 
 // orderBefore returns:

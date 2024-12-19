@@ -3,6 +3,7 @@ package types
 import "strconv"
 
 type PullRequest struct {
+	Number             string
 	Priority           []*Option
 	Link               *Link
 	Author             *Link
@@ -20,33 +21,41 @@ func PRStatus(isFirstInActiveQueue bool) string {
 	return "queued"
 }
 
-func PRPriorityOptions(prPriority int32) []*Option {
+func PRPriorityOptions(prNumber int, prPriority int32) []*Option {
 	options := make([]*Option, 0, 5)
-	for i := -2; i < 3; i++ {
-		options = append(options, priorityOption(int32(i), prPriority))
+	for i := 2; i > -2; i-- {
+		options = append(options, priorityOption(prNumber, int32(i), prPriority))
 	}
 	return options
 }
 
-func priorityOption(priority, prPriority int32) *Option {
+func priorityOption(prNumber int, priority, currentPRPriority int32) *Option {
+	var val string
+
+	if priority == currentPRPriority {
+		val = OptionValueSelected
+	} else {
+		val = strconv.Itoa(int(priority))
+	}
+
 	return &Option{
-		Value:    priorityToString(priority),
-		Selected: priority == prPriority,
+		ID:       strconv.Itoa(prNumber),
+		Text:     priorityToString(priority),
+		Value:    val,
+		Selected: priority == currentPRPriority,
 	}
 }
 
 func priorityToString(p int32) string {
 	switch p {
 	case 2:
-		return "++"
+		return `🚨`
 	case 1:
-		return "+"
+		return `🏃`
 	case 0:
-		return "o"
+		return `⚖️`
 	case -1:
-		return "-"
-	case -2:
-		return "--"
+		return `🐌`
 	default:
 		return strconv.FormatInt(int64(p), 32)
 	}

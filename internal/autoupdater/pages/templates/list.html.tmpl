@@ -21,10 +21,11 @@
             <h3>Repository {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h3>
           </header>
 
-          {{ if or $queue.ActivePRs $queue.SuspendedPRs }}
+            {{ if or $queue.ActivePRs $queue.SuspendedPRs }}
             <table class="queue_table">
               <tr>
                 <th>Rank</th>
+                <th>Priority</th>
                 <th>Pull Request</th>
                 <th>Author</th>
                 <th>In Mergequeue (Not Suspended)</th>
@@ -34,6 +35,13 @@
                 {{ range $i, $pr := $queue.ActivePRs }}
                   <tr class="tr_active_prs">
                   <td>{{ add $i 1 }}</td>
+                  <td>
+                    <select name="{{ $pr.Number }}" form="priority_form">
+                      {{ range $priority := .Priority }}
+                      <option id="{{ $priority.ID }}" value="{{ $priority.Value }}" {{ if $priority.Selected }}selected{{ end }}>{{ $priority.Text }}</option>
+                      {{ end }}
+                    </select>
+                  </td>
                   <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
                   <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
                   <td>
@@ -53,6 +61,13 @@
               {{ range $i, $pr := $queue.SuspendedPRs }}
                 <tr class="tr_suspended_prs">
                   <td></td>
+                  <td>
+                    <select name="{{ $pr.Number }}" form="priority_form">
+                      {{ range $priority := .Priority }}
+                      <option id="{{ $priority.ID }}" value="{{ $priority.Value }}" {{ if $priority.Selected }}selected{{ end }}>{{ $priority.Text }}</option>
+                      {{ end }}
+                    </select>
+                  </td>
                   <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
                   <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
                   <td>{{ $pr.EnqueuedSince }}</td>
@@ -61,6 +76,12 @@
                 </tr>
               {{ end }}
             </table>
+            <form id="priority_form" action={{ $data.PriorityChangePostURL }}  method="post">
+              <input type="hidden" name="owner" value="{{ $queue.RepositoryOwner }}">
+              <input type="hidden" name="repository" value="{{ $queue.Repository }}">
+              <input type="hidden" name="basebranch" value="{{ $queue.BaseBranch }}">
+              <input type="submit" value="Update Priorities" id="submit_priorities">
+            </form>
         </section>
         {{ else }}
           <section>

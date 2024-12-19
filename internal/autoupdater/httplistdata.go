@@ -3,13 +3,17 @@ package autoupdater
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/simplesurance/directorius/internal/autoupdater/pages/types"
 )
 
 func (a *Autoupdater) httpListData() *types.ListData {
-	result := types.ListData{CreatedAt: time.Now()}
+	result := types.ListData{
+		CreatedAt:             time.Now(),
+		PriorityChangePostURL: handlerPriorityUpdatePath,
+	}
 
 	a.queuesLock.Lock()
 	defer a.queuesLock.Unlock()
@@ -65,7 +69,8 @@ func toPagesPullRequests(prs []*PullRequest) []*types.PullRequest {
 
 func toPagesPullRequest(pr *PullRequest, isFirst bool) *types.PullRequest {
 	return &types.PullRequest{
-		Priority: types.PRPriorityOptions(pr.Priority.Load()),
+		Number:   strconv.Itoa(pr.Number),
+		Priority: types.PRPriorityOptions(pr.Number, pr.Priority.Load()),
 		Link: &types.Link{
 			Text: fmt.Sprintf("%s (#%d)", pr.Title, pr.Number),
 			URL:  pr.Link,

@@ -343,7 +343,7 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, 
 		})
 	}
 
-	autoupdater := autoupdater.NewAutoupdater(
+	au := autoupdater.NewAutoupdater(
 		autoupdater.Config{
 			GitHubClient:          githubClient,
 			EventChan:             ch,
@@ -359,24 +359,24 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, 
 
 	ctx, cancelFn := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancelFn()
-	if err := autoupdater.InitSync(ctx); err != nil {
+	if err := au.InitSync(ctx); err != nil {
 		logger.Error(
 			"autoupdater: initial synchronization failed",
 			zap.Error(err),
 		)
 	}
 
-	autoupdater.Start()
+	au.Start()
 
 	if config.WebInterfaceEndpoint != "" {
-		autoupdater.HTTPService().RegisterHandlers(mux, config.WebInterfaceEndpoint)
+		autoupdater.NewHTTPService(au, config.WebInterfaceEndpoint).RegisterHandlers(mux)
 		logger.Info(
 			"registered github pull request autoupdater http endpoint",
 			zap.String("endpoint", config.WebInterfaceEndpoint),
 		)
 	}
 
-	return autoupdater
+	return au
 }
 
 func mustValidateConfig(config *cfg.Config) {

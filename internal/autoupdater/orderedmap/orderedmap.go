@@ -2,6 +2,8 @@ package orderedmap
 
 import (
 	"iter"
+	"maps"
+	"slices"
 
 	"github.com/simplesurance/directorius/internal/linkedlist"
 )
@@ -108,4 +110,17 @@ func (m *Map[K, V]) AsSlice() []V {
 	}
 
 	return result
+}
+
+func (m *Map[K, V]) SortByKey(cmp func(a, b K) int) {
+	if m.Len() == 0 {
+		return
+	}
+	keys := maps.Keys(m.m)
+	sortedKeys := slices.SortedFunc(keys, cmp)
+
+	for _, k := range sortedKeys {
+		elem := m.m[k]
+		m.order.MoveToBack(elem)
+	}
 }
