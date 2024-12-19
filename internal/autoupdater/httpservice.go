@@ -44,10 +44,9 @@ func NewHTTPService(autoupdater *Autoupdater) *HTTPService {
 }
 
 func (h *HTTPService) RegisterHandlers(mux *http.ServeMux, endpoint string) {
-	mux.HandleFunc(endpoint+"{$}", h.HandlerListFunc)
+	mux.HandleFunc("GET "+endpoint+"{$}", h.HandlerListFunc)
 
 	staticPath := endpoint + "static" + "/"
-
 	mux.Handle(
 		staticPath,
 		http.StripPrefix(
