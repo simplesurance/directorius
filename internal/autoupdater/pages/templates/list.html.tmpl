@@ -4,61 +4,59 @@
     <meta charset="utf-8">
     <link rel="stylesheet" type="text/css" href="static/list.css">
     <title>Autoupdater Overview</title>
-    <h1>Autoupdater Overview</h1>
   </head>
 
-    <header><h2>Queues</h2></header>
 
+  <body>
+    {{ $data := . }}
+    <h1>Autoupdater Overview</h1>
+    <h2>Queues</h2>
     <div id="queue_content">
       {{ if not .Queues }}
-        <section>
-          No Pull-Requests enqueued.
-        </section>
+      <section> No Pull-Requests enqueued.</section>
       {{ end }}
       {{ range $queue := .Queues }}
-        <section>
-          <header>
-            <h3>Repository {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h3>
-          </header>
-
-            {{ if or $queue.ActivePRs $queue.SuspendedPRs }}
-            <table class="queue_table">
-              <tr>
-                <th>Rank</th>
-                <th>Priority</th>
-                <th>Pull Request</th>
-                <th>Author</th>
-                <th>In Mergequeue (Not Suspended)</th>
-                <th>Suspensions</th>
-                <th>Status</th>
-              </tr>
-                {{ range $i, $pr := $queue.ActivePRs }}
-                  <tr class="tr_active_prs">
-                  <td>{{ add $i 1 }}</td>
-                  <td>
-                    <select name="{{ $pr.Number }}" form="priority_form">
-                      {{ range $priority := .Priority }}
-                      <option id="{{ $priority.ID }}" value="{{ $priority.Value }}" {{ if $priority.Selected }}selected{{ end }}>{{ $priority.Text }}</option>
-                      {{ end }}
-                    </select>
-                  </td>
-                  <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
-                  <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
-                  <td>
-                    {{ $pr.EnqueuedSince }}
-                    {{ if $pr.InActiveQueueSince }}
-                      ({{ $pr.InActiveQueueSince }})
-                    {{ end }}
-                  </td>
-                  <td>{{ $pr.Suspensions }}</td>
-                  {{ if eq $i 0 }}
-                    <td id="td_status_updating">{{ $pr.Status }}</td>
-                  {{ else }}
-                    <td class="td_status_queued">{{ $pr.Status }}</td>
+      <section>
+        <h3>Repository {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h3>
+        {{ if or $queue.ActivePRs $queue.SuspendedPRs }}
+        <table class="queue_table">
+          <thead><tr>
+            <th>Rank</th>
+            <th>Priority</th>
+            <th>Pull Request</th>
+            <th>Author</th>
+            <th>In Mergequeue (Not Suspended)</th>
+            <th>Suspensions</th>
+            <th>Status</th>
+          </tr></thead>
+          <tbody>
+            {{ range $i, $pr := $queue.ActivePRs }}
+              <tr class="tr_active_prs">
+                <td>{{ add $i 1 }}</td>
+                <td>
+                  <select name="{{ $pr.Number }}" form="priority_form">
+                  {{ range $priority := .Priority }}
+                  <option id="{{ $priority.ID }}" value="{{ $priority.Value }}" {{ if $priority.Selected }}selected{{ end }}>{{ $priority.Text }}</option>
                   {{ end }}
+                  </select>
+                </td>
+                <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
+                <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
+                <td>
+                  {{ $pr.EnqueuedSince }}
+                  {{ if $pr.InActiveQueueSince }}
+                  ({{ $pr.InActiveQueueSince }})
+                  {{ end }}
+                </td>
+                <td>{{ $pr.Suspensions }}</td>
+                {{ if eq $i 0 }}
+                <td id="td_status_updating">{{ $pr.Status }}</td>
+                {{ else }}
+                <td class="td_status_queued">{{ $pr.Status }}</td>
+                {{ end }}
                 </tr>
-              {{ end }}
-              {{ range $i, $pr := $queue.SuspendedPRs }}
+                {{ end }}
+                {{ range $i, $pr := $queue.SuspendedPRs }}
                 <tr class="tr_suspended_prs">
                   <td></td>
                   <td>
@@ -74,7 +72,8 @@
                   <td>{{ $pr.Suspensions }}</td>
                   <td class="td_status_suspended">Suspended</td>
                 </tr>
-              {{ end }}
+                {{ end }}
+              </tbody>
             </table>
             <form id="priority_form" action={{ $data.PriorityChangePostURL }}  method="post">
               <input type="hidden" name="owner" value="{{ $queue.RepositoryOwner }}">
@@ -84,67 +83,49 @@
             </form>
         </section>
         {{ else }}
-          <section>
-            Base branch queue is empty.
-          </section>
+        <section>Base branch queue is empty.</section>
         {{ end }}
-      {{ end }}
+        {{ end }}
     </div>
 
-  <body>
     <div id="configuration">
       <section>
         <header>
           <h2>Configuration</h2>
             <ul>
-              <li>
-                <b>Enqueue on Automerge:</b> {{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}
-              </li>
+              <li><b>Enqueue on Automerge:</b>{{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}</li>
               <li>
                 <b>Enqueue on PR Labels:</b>
                 {{ if .TriggerLabels }}
                 <ul>
                   {{ range .TriggerLabels }}
-                    <li>
-                      {{ . }}
-                    </li>
+                  <li>{{ . }}</li>
                   {{ end }}
                 </ul>
-              </li>
-              {{ else }}
+                {{ else }}
                 disabled
-              {{ end }}
+                {{ end }}
+              </li>
               <li>
                 <b>Monitored Repositories:</b>
                 <ul>
                   {{ range .MonitoredRepositoriesitories }}
-                    <li>
-                      {{ . }}
-                    </li>
+                  <li>{{ . }}</li>
                   {{ end }}
                 </ul>
-                <li>
-                  <b>Processed Events:</b> {{ .ProcessedEvents }}
-                </li>
-                <li>
-                  <b>Active PR Periodic Check Interval:</b> {{ .PeriodicTriggerInterval }}
-                </li>
-                <li>
-                  <b>CI Server:</b> {{ .CIServer }}
-                </li>
+                <li><b>Processed Events:</b> {{ .ProcessedEvents }}</li>
+                <li><b>Active PR Periodic Check Interval:</b> {{ .PeriodicTriggerInterval }}</li>
+                <li><b>CI Server:</b> {{ .CIServer }}</li>
                 {{ if .CIJobURLs }}
                 <li>
                   <b>CI Jobs:</b>
                   <ul>
                     {{ range .CIJobURLs }}
-                      <li>
-                        {{ . }}
-                      </li>
+                    <li>{{ . }}</li>
                     {{ end }}
                   </ul>
                 </li>
                 {{ end }}
-              </li>
             </ul>
         </header>
       </section>
@@ -152,9 +133,7 @@
 
     <div id="explanation">
       <section>
-        <header>
-          <h2>Help! How does it work?</h2>
-        </header>
+        <h2>Help! How does it work?</h2>
 
         <p>
           The autoupdater triggers CI jobs and keeps pull requests up to date
@@ -189,13 +168,8 @@
   <footer>
     <hr>
     <small>
-      <p>
-      Page generated at: {{ .CreatedAt.Format "2006-01-02 15:04:05 MST" }}<br>
-      </p>
-
-      <p>
-      <a href="https://github.com/simplesurance/directorius">https://github.com/simplesurance/directorius</a>
-      </p>
+      <p>Page generated at: {{ .CreatedAt.Format "2006-01-02 15:04:05 MST" }}</p>
+      <p><a href="https://github.com/simplesurance/directorius">https://github.com/simplesurance/directorius</a></p>
     </small>
   </footer>
 </html>
