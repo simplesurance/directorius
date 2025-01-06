@@ -39,7 +39,7 @@ const (
 	prPriorityMin int = -1
 )
 
-const handlerPriorityUpdatePath = "/priority_post"
+const handlerPriorityUpdatePath = "priority_post"
 
 type HTTPService struct {
 	autoupdater *Autoupdater
