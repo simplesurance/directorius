@@ -7,4 +7,6 @@ type Queue struct {
 
 	ActivePRs    []*PullRequest
 	SuspendedPRs []*PullRequest
+
+	Paused bool
 }

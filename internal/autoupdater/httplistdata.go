@@ -14,6 +14,7 @@ func (a *Autoupdater) httpListData() *types.ListData {
 	result := types.ListData{
 		CreatedAt:             time.Now(),
 		PriorityChangePostURL: handlerPriorityUpdatePath,
+		SuspendResumePostURL:  handlerSuspendResumePath,
 	}
 
 	a.queuesLock.Lock()
@@ -47,6 +48,7 @@ func (a *Autoupdater) httpListData() *types.ListData {
 			RepositoryOwner: baseBranch.RepositoryOwner,
 			Repository:      baseBranch.Repository,
 			BaseBranch:      baseBranch.Branch,
+			Paused:          queue.IsPaused(),
 		}
 
 		activePRs, suspendedPRs := queue.asSlices()

@@ -21,8 +21,8 @@ import (
 
 const defPeriodicTriggerInterval = 30 * time.Minute
 
-// GithubClient defines the methods of a GithubAPI Client that are used by the
-// autoupdate implementation.
+// GithubClient defines the methods of a Github API Client that are used by the
+// autoupdater implementation.
 type GithubClient interface {
 	UpdateBranch(ctx context.Context, owner, repo string, pullRequestNumber int) (*githubclt.UpdateBranchResult, error)
 	CreateIssueComment(ctx context.Context, owner, repo string, issueOrPRNr int, comment string) error
@@ -32,13 +32,13 @@ type GithubClient interface {
 	AddLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
 }
 
-// Retryer defines methods for running GithubClient operations repeately if they fail with a temporary error.
+// Retryer defines methods for running GithubClient operations repeatedly if they fail with a temporary error.
 type Retryer interface {
 	Run(context.Context, func(context.Context) error, []zap.Field) error
 }
 
 // Autoupdater implements processing webhook events, querying the GitHub API
-// and enqueueing/dequeuing/triggering updating pull requests with the
+// and enqueuing/dequeuing/triggering updating pull requests with the
 // base-branch.
 // Pull request branch updates are serialized per base-branch.
 type Autoupdater struct {
@@ -670,7 +670,7 @@ func (a *Autoupdater) processPushEvent(ctx context.Context, logger *zap.Logger, 
 
 	for bbID, q := range a.queues {
 		if bbID == bb.BranchID {
-			q.ResumeAll()
+			q.ResumeAllPRs()
 		}
 	}
 }
@@ -1044,7 +1044,7 @@ func (a *Autoupdater) Resume(_ context.Context, baseBranch *BaseBranch, prNumber
 		return ErrNotFound
 	}
 
-	return q.Resume(prNumber)
+	return q.ResumePR(prNumber)
 }
 
 // ChangeBaseBranch dequeues a Pull Request from the queue oldBaseBranch and
@@ -1210,4 +1210,28 @@ func (a *Autoupdater) SetPullRequestPriorities(priorities *PRPriorityUpdates) {
 	if changes > 0 {
 		q.SortActiveQueue()
 	}
+}
+
+func (a *Autoupdater) getQueue(branchID *BranchID) *queue {
+	a.queuesLock.Lock()
+	defer a.queuesLock.Unlock()
+	return a.queues[*branchID]
+}
+
+func (a *Autoupdater) PauseQueue(branchID *BranchID) {
+	q := a.getQueue(branchID)
+	if q == nil {
+		return
+	}
+
+	q.Pause()
+}
+
+func (a *Autoupdater) ResumeQueue(branchID *BranchID) {
+	q := a.getQueue(branchID)
+	if q == nil {
+		return
+	}
+
+	q.Resume(context.Background())
 }

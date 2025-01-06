@@ -11,7 +11,9 @@ type ListData struct {
 	ProcessedEvents              uint64
 	CIServer                     string
 	CIJobURLs                    []string
-	PriorityChangePostURL        string
+
+	PriorityChangePostURL string
+	SuspendResumePostURL  string
 
 	// CreatedAt is the time when this datastructure was created.
 	CreatedAt time.Time

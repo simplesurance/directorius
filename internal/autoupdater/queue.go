@@ -92,6 +92,8 @@ type queue struct {
 	metrics *queueMetrics
 
 	ci *CI
+
+	paused atomic.Bool
 }
 
 func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retryer Retryer, ci *CI, headLabel string) *queue {
@@ -392,9 +394,8 @@ func (q *queue) Suspend(prNumber int) error {
 	return nil
 }
 
-// ResumeAll resumes updates for all pull request for that updating is
-// currently suspended.
-func (q *queue) ResumeAll() {
+// ResumeAllPRs resumes updates for all suspended pull requests.
+func (q *queue) ResumeAllPRs() {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
@@ -414,10 +415,10 @@ func (q *queue) ResumeAll() {
 	}
 }
 
-// Resume resumes updates for the pull request with the given number.
+// ResumePR resumes updates for the pull request with the given number.
 // If the pull request is not queued and suspended ErrNotFound is returned.
 // If the pull request is the only active pull request, the update operation is run for it.
-func (q *queue) Resume(prNumber int) error {
+func (q *queue) ResumePR(prNumber int) error {
 	q.lock.Lock()
 	pr, err := q._dequeueSuspended(prNumber)
 	q.lock.Unlock()
@@ -523,6 +524,11 @@ func (q *queue) isPRStale(pr *PullRequest) bool {
 func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 	loggingFields := pr.LogFields
 	logger := q.logger.With(loggingFields...)
+
+	if q.IsPaused() {
+		logger.Debug("skipping update", logFieldReason("mergequeue_paused"))
+		return
+	}
 
 	// q.setLastRun() is wrapped in a func to evaluate time.Now() on
 	// function exit instead of start
@@ -998,7 +1004,7 @@ func (q *queue) resumeIfPRMergeStatusPositive(ctx context.Context, logger *zap.L
 
 	switch status.CIStatus {
 	case githubclt.CIStatusSuccess, githubclt.CIStatusPending:
-		if err := q.Resume(pr.Number); err != nil {
+		if err := q.ResumePR(pr.Number); err != nil {
 			return fmt.Errorf("resuming updates failed: %w", err)
 		}
 
@@ -1129,6 +1135,40 @@ func (q *queue) SetPullRequestPriority(prNumber int, priority int32) error {
 	return nil
 }
 
+// Pause suspends the merge-queue.
+// Checking the status and triggering CI jobs for the first PR in the queue are
+// aborted and will be skipped.
+func (q *queue) Pause() {
+	q.logger.Info("pausing mergequeue ")
+	q.paused.Store(true)
+
+	if running := q.getExecuting(); running != nil {
+		running.cancelFunc()
+	}
+}
+
+func (q *queue) IsPaused() bool {
+	return q.paused.Load()
+}
+
+// Resume resumes the merge-queue.
+// The UnchangedSince status for all PRs in the active queue is reset, the
+// status of the first PR in the queue is checked and CI job runs are
+// eventually triggered.
+func (q *queue) Resume(ctx context.Context) {
+	q.logger.Info("resuming mergequeue ")
+
+	q.lock.Lock()
+	q.active.Foreach()(func(pr *PullRequest) bool {
+		pr.SetStateUnchangedSince(time.Time{})
+		return true
+	})
+	q.lock.Unlock()
+
+	q.paused.Store(false)
+	q.ScheduleUpdate(ctx, TaskTriggerCI)
+}
+
 // orderBefore returns:
 //
 //	-1 if x should be processed before y
@@ -1153,16 +1193,20 @@ func orderBefore(x, y *PullRequest) int {
 		return r
 	}
 
-	if (time.Since(x.InActiveQueueSince()) < 4*time.Hour) &&
-		(time.Since(y.InActiveQueueSince()) < 4*time.Hour) {
-		if r := cmp.Compare(x.SuspendCount.Load(), y.SuspendCount.Load()); r != 0 {
-			return r
-		}
-	}
+	xInActiveSince := x.InActiveQueueSince()
+	yInActiveSince := y.InActiveQueueSince()
 
-	if x.InActiveQueueSince().Sub(y.InActiveQueueSince()).Abs() > time.Minute {
-		if r := x.InActiveQueueSince().Compare(y.InActiveQueueSince()); r != 0 {
-			return r
+	if !xInActiveSince.IsZero() && !yInActiveSince.IsZero() {
+		if time.Since(xInActiveSince) < 4*time.Hour && time.Since(yInActiveSince) < 4*time.Hour {
+			if r := cmp.Compare(x.SuspendCount.Load(), y.SuspendCount.Load()); r != 0 {
+				return r
+			}
+
+			if xInActiveSince.Sub(yInActiveSince).Abs() > time.Minute {
+				if r := xInActiveSince.Compare(yInActiveSince); r != 0 {
+					return r
+				}
+			}
 		}
 	}
 

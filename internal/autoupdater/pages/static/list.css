@@ -26,7 +26,34 @@ body {
 
 }
 
-table[class="queue_table"] {
+.queue_table_container {
+  position: relative;
+  overflow: hidden;
+}
+
+.paused-overlay {
+  position: absolute;
+  width: 125%;
+  top: 50%;
+  left: -25%;
+  transform: translateY(-50%) rotate(-35deg);
+  background-color: rgba(255, 0, 0, 0.7);
+  color: black;
+  text-align: center;
+  font-size: 10rem;
+  font-weight: bold;
+  padding: 20px 0;
+  z-index: 1000;
+  letter-spacing: 10px;
+  pointer-events: none;
+}
+
+.queue_table_paused {
+  opacity: 0.7;
+}
+
+.queue_table {
+  position: relative;
   border: 1px solid #D9D7CE;
   width: 150ch;
   max-width: 98%;
@@ -36,18 +63,18 @@ table[class="queue_table"] {
   text-align: left;
 }
 
-table[class="queue_table"] th {
+.queue_table th {
   border-bottom: 3px solid #D9D7CE;
   background-color: #333333;
   color: white;
 }
 
-table.queue_table td {
+.queue_table td {
   padding: 10px;
   border-bottom: 1px solid #D9D7CE
 }
 
-table.queue_table tr:hover {
+.queue_table tr:hover {
   background-color: #E5E7EB;
 }
 

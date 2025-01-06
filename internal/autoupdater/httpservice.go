@@ -39,7 +39,10 @@ const (
 	prPriorityMin int = -1
 )
 
-const handlerPriorityUpdatePath = "priority_post"
+const (
+	handlerPriorityUpdatePath = "priority_post"
+	handlerSuspendResumePath  = "suspendresume_post"
+)
 
 type HTTPService struct {
 	autoupdater *Autoupdater
@@ -65,6 +68,8 @@ func (h *HTTPService) RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+h.basepath+"{$}", h.HandlerListFunc)
 	mux.HandleFunc("POST "+path.Join(h.basepath, handlerPriorityUpdatePath),
 		h.HandlerPriorityUpdate)
+	mux.HandleFunc("POST "+path.Join(h.basepath, handlerSuspendResumePath),
+		h.HandlerSuspendResume)
 
 	staticPath := h.basepath + "static" + "/"
 	mux.Handle(
@@ -95,6 +100,76 @@ func (h *HTTPService) HandlerPriorityUpdate(resp http.ResponseWriter, req *http.
 	h.autoupdater.SetPullRequestPriorities(updates)
 
 	http.Redirect(resp, req, h.basepath, http.StatusSeeOther)
+}
+
+func (h *HTTPService) HandlerSuspendResume(resp http.ResponseWriter, req *http.Request) {
+	const kAction = "action"
+
+	if err := req.ParseForm(); err != nil {
+		h.logger.Debug("parsing post-data failed",
+			zap.Error(err), logfields.HTTPRequestURL(req.RequestURI),
+		)
+
+		http.Error(resp, "could not parse form data", http.StatusBadRequest)
+		return
+	}
+
+	branchID, err := formToBranchID(req.Form)
+	if err != nil {
+		http.Error(resp, "parsing form data failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	switch a := req.Form.Get(kAction); a {
+	case "resume":
+		h.autoupdater.ResumeQueue(branchID)
+	case "pause":
+		h.autoupdater.PauseQueue(branchID)
+
+	case "":
+		http.Error(resp,
+			fmt.Sprintf("parsing form data failed: %q value is missing or empty", kAction),
+			http.StatusBadRequest,
+		)
+		return
+	default:
+		http.Error(resp,
+			fmt.Sprintf("parsing form data failed: unexpected %q value %q", kAction, a),
+			http.StatusBadRequest)
+
+		return
+	}
+
+	http.Redirect(resp, req, h.basepath, http.StatusSeeOther)
+}
+
+func formToBranchID(form url.Values) (*BranchID, error) {
+	const (
+		kRepo       = "repository"
+		kRepoOwner  = "repository_owner"
+		kBaseBranch = "base_branch"
+	)
+
+	repo := form.Get(kRepo)
+	if repo == "" {
+		return nil, fmt.Errorf("%q value is missing or empty", kRepo)
+	}
+
+	repoOwner := form.Get(kRepoOwner)
+	if repoOwner == "" {
+		return nil, fmt.Errorf("%q value is missing or empty", kRepoOwner)
+	}
+
+	baseBranch := form.Get(kBaseBranch)
+	if baseBranch == "" {
+		return nil, fmt.Errorf("%q value is missing or empty", kBaseBranch)
+	}
+
+	return &BranchID{
+		RepositoryOwner: repoOwner,
+		Repository:      repo,
+		Branch:          baseBranch,
+	}, nil
 }
 
 func formToPriorityUpdates(form url.Values) (*PRPriorityUpdates, error) {

@@ -132,13 +132,6 @@ func mockGetBuildFromQueueItemID(clt *mocks.MockCIClient) *gomock.Call {
 		Return(b, err)
 }
 
-func (a *Autoupdater) getQueue(key BranchID) *queue {
-	a.queuesLock.Lock()
-	defer a.queuesLock.Unlock()
-
-	return a.queues[key]
-}
-
 func (q *queue) activeLen() int {
 	q.lock.Lock()
 	defer q.lock.Unlock()
@@ -270,7 +263,7 @@ func TestPushToBaseBranchTriggersUpdate(t *testing.T) {
 	err = autoupdater.Enqueue(context.Background(), baseBranch, pr)
 	require.NoError(t, err)
 
-	queue := autoupdater.getQueue(baseBranch.BranchID)
+	queue := autoupdater.getQueue(&baseBranch.BranchID)
 	require.NotNil(t, queue)
 	assert.Equal(t, 1, queue.activeLen())
 	assert.Equal(t, 0, queue.suspendedLen())
@@ -318,7 +311,7 @@ func TestPushToBaseBranchResumesPRs(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.NotNil(t, queue)
 
 	waitForSuspendQueueLen(t, queue, 1)
@@ -375,7 +368,7 @@ func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
 
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: oldBaseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: oldBaseBranch})
 	require.NotNil(t, queue)
 
 	newBaseBranch := "develop"
@@ -385,10 +378,10 @@ func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
 
 	assert.Nil(
 		t,
-		autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: oldBaseBranch}),
+		autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: oldBaseBranch}),
 	)
 
-	queue = autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: newBaseBranch})
+	queue = autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: newBaseBranch})
 	require.NotNil(t, queue, "queue for new base branch does not exist")
 
 	require.Equal(t, 1, queue.activeLen())
@@ -434,7 +427,7 @@ func TestUnlabellingPRDequeuesPR(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, oldBaseBranch, triggerLabel)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: oldBaseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: oldBaseBranch})
 	require.NotNil(t, queue)
 
 	evChan <- &github_prov.Event{Event: newPullRequestUnlabeledEvent(prNumber, prBranch, oldBaseBranch, triggerLabel)}
@@ -485,7 +478,7 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.NotNil(t, queue)
 	require.Equal(t, 1, queue.activeLen())
 	require.Empty(t, queue.suspended)
@@ -493,7 +486,7 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestClosedEvent(prNumber, prBranch, baseBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 2)
 
-	queue = autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue = autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.Nil(t, queue, "baseBranch queue still exist after only PR for the base branch was closed")
 }
 
@@ -631,13 +624,13 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 			err = autoupdater.Enqueue(context.Background(), baseBranch2, pr3)
 			require.NoError(t, err)
 
-			queueBaseBranch1 := autoupdater.getQueue(baseBranch1.BranchID)
+			queueBaseBranch1 := autoupdater.getQueue(&baseBranch1.BranchID)
 			require.NotNil(t, queueBaseBranch1)
 			waitForSuspendQueueLen(t, queueBaseBranch1, 2)
 			assert.Equal(t, 0, queueBaseBranch1.activeLen(), "active queue")
 			assert.Equal(t, 2, queueBaseBranch1.suspendedLen(), "suspend queue")
 
-			queueBaseBranch2 := autoupdater.getQueue(baseBranch2.BranchID)
+			queueBaseBranch2 := autoupdater.getQueue(&baseBranch2.BranchID)
 			require.NotNil(t, queueBaseBranch2)
 
 			waitForSuspendQueueLen(t, queueBaseBranch2, 1)
@@ -785,13 +778,13 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 			err = autoupdater.Enqueue(context.Background(), baseBranch2, pr3)
 			require.NoError(t, err)
 
-			queueBaseBranch1 := autoupdater.getQueue(baseBranch1.BranchID)
+			queueBaseBranch1 := autoupdater.getQueue(&baseBranch1.BranchID)
 			require.NotNil(t, queueBaseBranch1)
 
 			waitForActiveQueueLen(t, queueBaseBranch1, 2)
 			assert.Equal(t, 0, queueBaseBranch1.suspendedLen(), "suspend queue")
 
-			queueBaseBranch2 := autoupdater.getQueue(baseBranch2.BranchID)
+			queueBaseBranch2 := autoupdater.getQueue(&baseBranch2.BranchID)
 			require.NotNil(t, queueBaseBranch2)
 
 			waitForActiveQueueLen(t, queueBaseBranch2, 1)
@@ -854,7 +847,7 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 	err = autoupdater.Enqueue(context.Background(), baseBranch, pr)
 	require.NoError(t, err)
 
-	queue := autoupdater.getQueue(baseBranch.BranchID)
+	queue := autoupdater.getQueue(&baseBranch.BranchID)
 	require.NotNil(t, queue)
 
 	require.Eventually(
@@ -939,7 +932,7 @@ func TestPRIsSuspendedWhenUptodateAndHasFailedStatus(t *testing.T) {
 			evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
 			waitForProcessedEventCnt(t, autoupdater, 1)
 
-			queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+			queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 			require.NotNil(t, queue)
 			assert.Empty(t, queue.activeLen())
 			assert.Len(t, queue.suspended, 1)
@@ -984,14 +977,14 @@ func TestEnqueueDequeueByAutomergeEvents(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch.Branch)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(baseBranch.BranchID)
+	queue := autoupdater.getQueue(&baseBranch.BranchID)
 	assert.Equal(t, 1, queue.activeLen())
 	assert.Empty(t, queue.suspendedLen())
 
 	evChan <- &github_prov.Event{Event: newPullRequestAutomergeDisabledEvent(prNumber, prBranch, baseBranch.Branch)}
 	waitForProcessedEventCnt(t, autoupdater, 2)
 
-	assert.Nil(t, autoupdater.getQueue(baseBranch.BranchID), "basebranch queue still exist after automerge was disabled")
+	assert.Nil(t, autoupdater.getQueue(&baseBranch.BranchID), "basebranch queue still exist after automerge was disabled")
 }
 
 func TestInitialSync(t *testing.T) {
@@ -1089,7 +1082,7 @@ func TestInitialSync(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(autoupdater.Stop)
 
-	q := autoupdater.getQueue(BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "main"})
+	q := autoupdater.getQueue(&BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "main"})
 	require.NotNil(t, q)
 	q.lock.Lock()
 	assert.NotNil(t, q.active.Get(1), "pr1 was not added to the queue")
@@ -1097,7 +1090,7 @@ func TestInitialSync(t *testing.T) {
 	assert.Nil(t, q.active.Get(3), "pr3 was added to the queue but should not")
 	q.lock.Unlock()
 
-	q = autoupdater.getQueue(BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "pr3"})
+	q = autoupdater.getQueue(&BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "pr3"})
 	require.NotNil(t, q)
 	q.lock.Lock()
 	assert.NotNil(t, q.active.Get(4), "pr4 was not added to the queue")
@@ -1188,7 +1181,7 @@ func TestReviewApprovedEventResumesSuspendedPR(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	// PR should be in suspend queue, it is not approved
 	require.NotNil(t, queue)
 	assert.Empty(t, queue.activeLen())
@@ -1242,7 +1235,7 @@ func TestDismissingApprovalSuspendsActivePR(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.NotNil(t, queue)
 	assert.Equal(t, 1, queue.activeLen(), "pr not in active queue")
 	assert.Empty(t, queue.suspended, "pr is suspended")
@@ -1296,7 +1289,7 @@ func TestRequestingReviewChangesSuspendsPR(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.NotNil(t, queue)
 	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
 	assert.Equal(t, 1, queue.activeLen(), "pr not in active queue")
@@ -1347,7 +1340,7 @@ func TestUpdatesAreResumedIfTestsFailAndBaseIsUpdated(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	// PR should be in suspend queue, tests are failing
 	require.NotNil(t, queue)
 	assert.Empty(t, queue.activeLen())
@@ -1407,7 +1400,7 @@ func TestBaseBranchUpdatesBlockUntilFinished(t *testing.T) {
 
 	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch.Branch)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
-	queue := autoupdater.getQueue(baseBranch.BranchID)
+	queue := autoupdater.getQueue(&baseBranch.BranchID)
 
 	const waitForBranchUpdateCallCount = 3
 	require.Eventually(t, func() bool {
@@ -1461,7 +1454,7 @@ func TestPRHeadLabelIsAppliedToNextAfterMerge(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(pr1Number, pr1Branch, baseBranch)}
 	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(pr2Number, pr2Branch, baseBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 2)
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 
 	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
 	mockReadyForMergeStatus(
@@ -1532,7 +1525,7 @@ func TestCIJobsTriggeredOnSync(t *testing.T) {
 
 	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 
 	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
 	evChan <- &github_prov.Event{Event: newSyncEvent(prNumber, prBranch, baseBranch)}
@@ -1585,7 +1578,7 @@ func TestCIJobsNotTriggeredWhenBranchNeedsUpdate(t *testing.T) {
 
 	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.NotNil(t, queue)
 	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
 }
@@ -1665,7 +1658,7 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 
 			evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch)}
 			waitForProcessedEventCnt(t, autoupdater, 1)
-			queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+			queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 
 			waitForQueueUpdateRunsGreaterThan(t, queue, 0)
 		})
@@ -1770,7 +1763,7 @@ func TestCIFailuresFromObsoleteBuildsDoNotSuspendPRs(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
 
-	queue := autoupdater.getQueue(BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.NotNil(t, queue)
 	assert.Equal(t, 1, queue.activeLen())
 
@@ -1789,4 +1782,66 @@ func TestCIFailuresFromObsoleteBuildsDoNotSuspendPRs(t *testing.T) {
 
 	assert.Equal(t, 1, queue.activeLen())
 	assert.Empty(t, queue.suspended)
+}
+
+func TestPauseResumeQueue(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	evChan := make(chan *github_prov.Event, 1)
+	defer close(evChan)
+
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockCIClient(mockctrl)
+
+	pr, err := NewPullRequest(1, "pr_branch", "", "", "")
+	require.NoError(t, err)
+
+	mockSuccessfulGithubUpdateBranchCall(ghClient, pr.Number, false).Times(4)
+	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr.Number).Times(4)
+	mockReadyForMergeStatus(
+		ghClient, pr.Number,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+	).Times(4)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+
+	autoupdater.Start()
+	t.Cleanup(autoupdater.Stop)
+
+	baseBranch, err := NewBaseBranch(repoOwner, repo, "main")
+	require.NoError(t, err)
+
+	err = autoupdater.Enqueue(context.Background(), baseBranch, pr)
+	require.NoError(t, err)
+
+	queue := autoupdater.getQueue(&baseBranch.BranchID)
+	require.NotNil(t, queue)
+	assert.Equal(t, 1, queue.activeLen())
+	assert.Equal(t, 0, queue.suspendedLen())
+
+	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
+
+	evChan <- &github_prov.Event{Event: newPushEvent(baseBranch.Branch)}
+	waitForProcessedEventCnt(t, autoupdater, 1)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
+
+	autoupdater.PauseQueue(&baseBranch.BranchID)
+	evChan <- &github_prov.Event{Event: newPushEvent(baseBranch.Branch)}
+	waitForProcessedEventCnt(t, autoupdater, 2)
+
+	// resume triggers an update call
+	autoupdater.ResumeQueue(&baseBranch.BranchID)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 2)
+
+	evChan <- &github_prov.Event{Event: newPushEvent(baseBranch.Branch)}
+	waitForProcessedEventCnt(t, autoupdater, 3)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 3)
 }
