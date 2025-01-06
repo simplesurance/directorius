@@ -3,6 +3,7 @@ package autoupdater
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 
@@ -50,6 +51,9 @@ func (a *Autoupdater) httpListData() *types.ListData {
 
 		activePRs, suspendedPRs := queue.asSlices()
 
+		// sort them PRs to show list in a stable order in the UI
+		slices.SortFunc(suspendedPRs, orderBefore)
+
 		queueData.ActivePRs = toPagesPullRequests(activePRs)
 		queueData.SuspendedPRs = toPagesPullRequests(suspendedPRs)
 
@@ -64,6 +68,7 @@ func toPagesPullRequests(prs []*PullRequest) []*types.PullRequest {
 	for i, pr := range prs {
 		result = append(result, toPagesPullRequest(pr, i == 0))
 	}
+
 	return result
 }
 
