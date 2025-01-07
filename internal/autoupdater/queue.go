@@ -1135,17 +1135,25 @@ func (q *queue) SetPullRequestPriority(prNumber int, priority int32) error {
 //	 0 if x and y have the same order
 //	+1 if x should be processed after y.
 //
-// x should be processed before y when the first statement applies:
+// x should be processed before y when the first of the following conditions apply:
 //   - [PullRequest.Priority] is bigger.
-//   - [PullRequest.SuspendCount] is smaller.
+//   - [PullRequest.InActiveQueueSince] is younger than 4h and
+//     [PullRequest.SuspendCount] is smaller. (PRs with constant CI failures
+//     are deprioritized. The 4h limit prevents that they starve in the queue
+//     because of a flaky or temporary CI failures when there is always another
+//     PR in the queue.)
 //   - The [PullRequest.EnqueuedAt] timestamp is older.
 //   - The [PullRequest.Number] timestamp is smaller.
 func orderBefore(x, y *PullRequest) int {
 	if r := cmp.Compare(y.Priority.Load(), x.Priority.Load()); r != 0 {
 		return r
 	}
-	if r := cmp.Compare(x.SuspendCount.Load(), y.SuspendCount.Load()); r != 0 {
-		return r
+
+	if (time.Since(x.InActiveQueueSince()) < 4*time.Hour) &&
+		(time.Since(y.InActiveQueueSince()) < 4*time.Hour) {
+		if r := cmp.Compare(x.SuspendCount.Load(), y.SuspendCount.Load()); r != 0 {
+			return r
+		}
 	}
 
 	if r := x.EnqueuedAt.Compare(y.EnqueuedAt); r != 0 {
