@@ -42,9 +42,9 @@ body {
   text-align: center;
   font-size: 10rem;
   font-weight: bold;
-  padding: 20px 0;
+  padding: 0.3125rem 0;
   z-index: 1000;
-  letter-spacing: 10px;
+  letter-spacing: 0.625rem;
   pointer-events: none;
 }
 
@@ -70,7 +70,7 @@ body {
 }
 
 .queue_table td {
-  padding: 10px;
+  padding: 0.625rem;
   border-bottom: 1px solid #D9D7CE
 }
 
@@ -102,7 +102,7 @@ table td[class="td_status_suspended"] {
 }
 
 div[id=configuration] {
-  margin-top: 30px;
+  margin-top: 1.875rem;
   padding: 1.5em;
   background-color: #FFFFFF;
   line-height: 1.6;
@@ -113,7 +113,7 @@ div[id=configuration] {
 }
 
 div[id="explanation"] {
-  margin-top: 100px;
+  margin-top: 6.25rem;
 }
 
 h1,
@@ -127,5 +127,5 @@ hr {
   border: none;
   height: 2px;
   background-color: #D9D7CE;
-  margin: 30px 0;
+  margin: 1.875rem 0;
 }
