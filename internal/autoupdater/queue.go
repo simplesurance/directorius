@@ -1142,6 +1142,10 @@ func (q *queue) SetPullRequestPriority(prNumber int, priority int32) error {
 //     are deprioritized. The 4h limit prevents that they starve in the queue
 //     because of a flaky or temporary CI failures when there is always another
 //     PR in the queue.)
+//   - The [PullRequest.InActiveQueueSince] difference is >1 minute and the
+//     timestamp is older. (The difference must be >1min to prevent that when
+//     multiple PRs are added to the active queue again, that the one that was
+//     handled first randomly is prioritzed.)
 //   - The [PullRequest.EnqueuedAt] timestamp is older.
 //   - The [PullRequest.Number] timestamp is smaller.
 func orderBefore(x, y *PullRequest) int {
@@ -1152,6 +1156,12 @@ func orderBefore(x, y *PullRequest) int {
 	if (time.Since(x.InActiveQueueSince()) < 4*time.Hour) &&
 		(time.Since(y.InActiveQueueSince()) < 4*time.Hour) {
 		if r := cmp.Compare(x.SuspendCount.Load(), y.SuspendCount.Load()); r != 0 {
+			return r
+		}
+	}
+
+	if x.InActiveQueueSince().Sub(y.InActiveQueueSince()).Abs() > time.Minute {
+		if r := x.InActiveQueueSince().Compare(y.InActiveQueueSince()); r != 0 {
 			return r
 		}
 	}
