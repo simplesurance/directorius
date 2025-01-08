@@ -1197,15 +1197,22 @@ func orderBefore(x, y *PullRequest) int {
 	yInActiveSince := y.InActiveQueueSince()
 
 	if !xInActiveSince.IsZero() && !yInActiveSince.IsZero() {
-		if time.Since(xInActiveSince) < 4*time.Hour && time.Since(yInActiveSince) < 4*time.Hour {
+		switch {
+		case time.Since(xInActiveSince) < 4*time.Hour && time.Since(yInActiveSince) < 4*time.Hour:
 			if r := cmp.Compare(x.SuspendCount.Load(), y.SuspendCount.Load()); r != 0 {
 				return r
 			}
 
-			if xInActiveSince.Sub(yInActiveSince).Abs() > time.Minute {
-				if r := xInActiveSince.Compare(yInActiveSince); r != 0 {
-					return r
-				}
+		case time.Since(xInActiveSince) < 4*time.Hour && x.SuspendCount.Load() > 1:
+			return 1
+
+		case time.Since(yInActiveSince) < 4*time.Hour && y.SuspendCount.Load() > 1:
+			return -1
+		}
+
+		if xInActiveSince.Sub(yInActiveSince).Abs() > time.Minute {
+			if r := xInActiveSince.Compare(yInActiveSince); r != 0 {
+				return r
 			}
 		}
 	}

@@ -161,3 +161,48 @@ func TestActiveQueueOrder(t *testing.T) {
 	require.Equal(t, prNeutralPrio, activePrs[4])
 	require.Equal(t, prNegativePrio, activePrs[5])
 }
+
+func TestOrderBefore_LowerSuspendCntFirst(t *testing.T) {
+	pr1, err := NewPullRequest(1, "br1", "", "", "")
+	require.NoError(t, err)
+	pr1.SetInActiveQueueSince()
+	pr1.SuspendCount.Store(4)
+
+	pr2, err := NewPullRequest(2, "br2", "", "", "")
+	require.NoError(t, err)
+	pr2.SetInActiveQueueSince()
+	pr2.SuspendCount.Store(5)
+
+	require.Equal(t, -1, orderBefore(pr1, pr2))
+	require.Equal(t, 1, orderBefore(pr2, pr1))
+}
+
+func TestOrderBefore_SuspendCntIgnoredIfInActiveQueueForLongTime(t *testing.T) {
+	pr1, err := NewPullRequest(1, "br1", "", "", "")
+	require.NoError(t, err)
+	pr1.SetInActiveQueueSince()
+	pr1.SuspendCount.Store(4)
+
+	pr2, err := NewPullRequest(2, "br2", "", "", "")
+	require.NoError(t, err)
+	ts := time.Now().Add(-48 * time.Hour)
+	pr2.inActiveQueueSince.Store(&ts)
+	pr2.SuspendCount.Store(5)
+
+	require.Equal(t, 1, orderBefore(pr1, pr2))
+	require.Equal(t, -1, orderBefore(pr2, pr1))
+}
+
+func TestOrderBefore_OrderByInActiveSinceTsWhenSuspendCntIsZero(t *testing.T) {
+	pr1, err := NewPullRequest(1, "br1", "", "", "")
+	require.NoError(t, err)
+	ts := time.Now().Add(-48 * time.Hour)
+	pr1.inActiveQueueSince.Store(&ts)
+
+	pr2, err := NewPullRequest(2, "br2", "", "", "")
+	require.NoError(t, err)
+	pr2.SetInActiveQueueSince()
+
+	require.Equal(t, -1, orderBefore(pr1, pr2))
+	require.Equal(t, 1, orderBefore(pr2, pr1))
+}
