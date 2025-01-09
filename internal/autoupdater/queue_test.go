@@ -206,3 +206,16 @@ func TestOrderBefore_OrderByInActiveSinceTsWhenSuspendCntIsZero(t *testing.T) {
 	require.Equal(t, -1, orderBefore(pr1, pr2))
 	require.Equal(t, 1, orderBefore(pr2, pr1))
 }
+
+func TestOrderBefore_OlderEnqueuedAtTimeFirst(t *testing.T) {
+	pr1, err := NewPullRequest(1, "br1", "", "", "")
+	require.NoError(t, err)
+	pr1.SetInActiveQueueSince()
+
+	pr2, err := NewPullRequest(2, "br2", "", "", "")
+	require.NoError(t, err)
+	pr2.SetInActiveQueueSince()
+	pr2.EnqueuedAt = time.Now().Add(-30 * time.Minute)
+
+	require.Equal(t, 1, orderBefore(pr1, pr2))
+}
