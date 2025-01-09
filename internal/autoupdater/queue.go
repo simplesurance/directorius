@@ -38,6 +38,8 @@ const (
 
 const updateBranchPollInterval = 2 * time.Second
 
+const githubStatusContext = "directorius"
+
 // queue implements a queue for automatically updating pull request branches
 // with their base branch.
 // Enqueued pull requests can either be in active or suspended state.
@@ -334,6 +336,7 @@ func (q *queue) Dequeue(prNumber int) (*PullRequest, error) {
 		removed.LogFields...)
 
 	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", removed)
+	q.prCreateCommitStatus(context.Background(), removed, "", false)
 
 	if newFirstElem == nil {
 		return removed, nil
@@ -589,6 +592,8 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		// error is logged in q.updatePRIfNeeded
 		return
 	}
+
+	q.prCreateCommitStatus(ctx, pr, updateHeadCommit, true)
 
 	timer.Stop()
 
@@ -927,6 +932,65 @@ func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr
 		append([]zapcore.Field{
 			zap.String("github_label", q.headLabel),
 		}, pr.LogFields...)...)
+}
+
+func (q *queue) prCreateCommitStatus(
+	ctx context.Context, pr *PullRequest, commit string, isFirst bool,
+) {
+	var desc, state string
+
+	lf := logfields.NewWith(pr.LogFields,
+		zap.String("github.status.state", state),
+		zap.String("github.status.description", desc),
+		zap.String("github.status.context", githubStatusContext),
+	)
+	if commit != "" {
+		lf = append(lf, logfields.Commit(commit))
+	}
+
+	if !isFirst && commit == "" {
+		q.logger.DPanic("prCreateCommitStatus called with empty commit and isFirst set to true, expecting a commit when isFirst is true",
+			lf...)
+		return
+	}
+
+	if isFirst {
+		state = githubclt.StateSuccess
+		desc = "first in merge queue"
+	} else {
+		state = githubclt.StatePending
+	}
+
+	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
+	defer cancelFunc()
+
+	err := q.retryer.Run(ctx, func(ctx context.Context) error {
+		if commit != "" {
+			return q.ghClient.CreateCommitStatus(ctx,
+				q.baseBranch.RepositoryOwner, q.baseBranch.Repository,
+				commit,
+				state, desc, githubStatusContext,
+			)
+		}
+
+		return q.ghClient.CreateHeadCommitStatus(ctx,
+			q.baseBranch.RepositoryOwner, q.baseBranch.Repository,
+			pr.Number,
+			state, desc, githubStatusContext,
+		)
+	}, logfields.NewWith(lf, logfields.Operation("github.create_commit_status")))
+	if err != nil {
+		q.logger.Warn("creating commit status failed",
+			logfields.NewWith(lf, zap.Error(err))...,
+		)
+		return
+	}
+
+	if isFirst {
+		pr.SetLastSuccessfulGHStatusReportedCommit(commit)
+	}
+
+	q.logger.Info("created github commit status", lf...)
 }
 
 // ActivePRsByBranch returns all pull requests that are in active state and for

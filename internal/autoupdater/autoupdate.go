@@ -30,6 +30,8 @@ type GithubClient interface {
 	ReadyForMerge(ctx context.Context, owner, repo string, prNumber int) (*githubclt.ReadyForMergeStatus, error)
 	RemoveLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
 	AddLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
+	CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error
+	CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error
 }
 
 // Retryer defines methods for running GithubClient operations repeatedly if they fail with a temporary error.
@@ -234,9 +236,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 	switch ev := event.Event.(type) {
 	case *github.PullRequestEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for unmonitored repository",
-			)
+			logger.Debug("event is for unmonitored repository")
 
 			return
 		}
@@ -245,9 +245,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.PushEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for repository that is not monitored",
-			)
+			logger.Debug("event is for repository that is not monitored")
 
 			return
 		}
@@ -256,9 +254,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.StatusEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for repository that is not monitored",
-			)
+			logger.Debug("event is for repository that is not monitored")
 
 			return
 		}
@@ -267,9 +263,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.CheckRunEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for repository that is not monitored",
-			)
+			logger.Debug("event is for repository that is not monitored")
 
 			return
 		}
@@ -277,9 +271,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.PullRequestReviewEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for repository that is not monitored",
-			)
+			logger.Debug("event is for repository that is not monitored")
 
 			return
 		}

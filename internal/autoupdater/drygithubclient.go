@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/simplesurance/directorius/internal/githubclt"
+	"github.com/simplesurance/directorius/internal/logfields"
 )
 
 const headCommitID = "32d4ff96ea72412277bbfd22ff1bab3a5263b415"
@@ -54,5 +55,31 @@ func (*DryGithubClient) AddLabel(context.Context, string, string, int, string) e
 }
 
 func (*DryGithubClient) RemoveLabel(context.Context, string, string, int, string) error {
+	return nil
+}
+
+func (c *DryGithubClient) CreateCommitStatus(_ context.Context, owner, repo, commit, state, description, context string) error {
+	c.logger.Info("simulated creating of github commit status, status has not been created on github",
+		logfields.RepositoryOwner(owner),
+		logfields.Repository(repo),
+		logfields.Commit(commit),
+		zap.String("github.status.state", state),
+		zap.String("github.status.description", description),
+		zap.String("github.status.context", context),
+	)
+
+	return nil
+}
+
+func (c *DryGithubClient) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error {
+	c.logger.Info("simulated creating of github commit status, status has not been created on github",
+		logfields.RepositoryOwner(owner),
+		logfields.Repository(repo),
+		logfields.PullRequest(pullRequestNumber),
+		zap.String("github.status.state", state),
+		zap.String("github.status.description", description),
+		zap.String("github.status.context", context),
+	)
+
 	return nil
 }

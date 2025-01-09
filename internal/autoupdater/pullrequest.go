@@ -41,6 +41,8 @@ type PullRequest struct {
 
 	stateUnchangedSince time.Time
 	lock                sync.Mutex // must be held when accessing stateUnchangedSince
+
+	githubStatusLastSuccessSetCommit atomic.Value
 }
 
 func NewPullRequestFromEvent(ev *github.PullRequest) (*PullRequest, error) {
@@ -81,6 +83,7 @@ func NewPullRequest(nr int, branch, author, title, link string) (*PullRequest, e
 		inActiveQueueSince:  atomic.Pointer[time.Time]{},
 	}
 	pr.inActiveQueueSince.Store(&time.Time{})
+	pr.githubStatusLastSuccessSetCommit.Store("")
 
 	return &pr, nil
 }
@@ -177,4 +180,12 @@ func (p *PullRequest) SetInActiveQueueSince() {
 // If it isn't in the active queue the zero value is returned.
 func (p *PullRequest) InActiveQueueSince() time.Time {
 	return *p.inActiveQueueSince.Load()
+}
+
+func (p *PullRequest) LastSuccessfulGHStatusReportedCommit() string {
+	return p.githubStatusLastSuccessSetCommit.Load().(string)
+}
+
+func (p *PullRequest) SetLastSuccessfulGHStatusReportedCommit(commit string) {
+	p.githubStatusLastSuccessSetCommit.Store(commit)
 }

@@ -270,6 +270,27 @@ func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit, 
 	return clt.wrapRetryableErrors(err)
 }
 
+// CreateCommitStatus submits a status for the HEAD commit of a pull request branch.
+// state must be one of [StatePending], [StateSuccess], [StateError], [StateFailure].
+func (clt *Client) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error {
+	pr, _, err := clt.restClt.PullRequests.Get(ctx, owner, repo, pullRequestNumber)
+	if err != nil {
+		return clt.wrapRetryableErrors(err)
+	}
+
+	prHead := pr.GetHead()
+	if prHead == nil {
+		return errors.New("got pull request object with empty head")
+	}
+
+	prHeadSHA := prHead.GetSHA()
+	if prHeadSHA == "" {
+		return errors.New("got pull request object with empty head sha")
+	}
+
+	return clt.CreateCommitStatus(ctx, owner, repo, prHeadSHA, state, description, context)
+}
+
 type PRIterator interface {
 	Next() (*github.PullRequest, error)
 }
@@ -391,3 +412,5 @@ func (clt *Client) wrapGraphQLRetryableErrors(err error) error {
 
 	return err
 }
+
+func (clt *Client PRsWithLabel(
