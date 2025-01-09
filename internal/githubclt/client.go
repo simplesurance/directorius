@@ -259,7 +259,7 @@ func (clt *Client) RemoveLabel(ctx context.Context, owner, repo string, pullRequ
 	return nil
 }
 
-// CreateCommitStatus submits a commit status.
+// CreateCommitStatus submits a status for a commit.
 // state must be one of [StatePending], [StateSuccess], [StateError], [StateFailure].
 func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error {
 	_, _, err := clt.restClt.Repositories.CreateStatus(ctx, owner, repo, commit, &github.RepoStatus{
