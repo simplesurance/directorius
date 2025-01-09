@@ -49,21 +49,9 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 
 	logger.Info("starting synchronization")
 
-	var stateFilter string
-	a.queuesLock.Lock()
-	// if no pull requests are queued for updates, there are no
-	// pull requests that can be removed from the queue. Therefore it is
-	// sufficient to get information for open prs from GitHub.
-	if len(a.queues) == 0 {
-		stateFilter = "open"
-	} else {
-		stateFilter = "all"
-	}
-	a.queuesLock.Unlock()
-
 	// TODO: could we query less pull requests by ignoring PRs that are
 	// closed and were last changed before goordinator started?
-	it := a.GitHubClient.ListPullRequests(ctx, owner, repo, stateFilter, "asc", "created")
+	it := a.GitHubClient.ListPullRequests(ctx, owner, repo, "open", "asc", "created")
 	for {
 		var pr *github.PullRequest
 
