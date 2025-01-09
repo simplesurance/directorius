@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"time"
 
-	"github.com/google/go-github/v67/github"
 	"go.uber.org/zap"
 
+	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/logfields"
 )
 
@@ -17,17 +18,18 @@ type syncAction int
 const (
 	undefined syncAction = iota
 	enqueue
-	dequeue
 	unlabel
+	resetStatusState
 )
 
 // InitSync does an initial synchronization of the autoupdater queues with the
 // pull request state at GitHub.
-// This is intended to be run before Autoupdater is started.
+// It must be run **before** Autoupdater is started.
 // Pull request information is queried from github.
 // If a PR meets a condition to be enqueued for auto-updates it is enqueued.
 // If it meets a condition for not being automatically updated, it is dequeued.
-// If a PR has the [a.headLabel] set it is removed.
+// If a PR has the [a.HeadLabel] it is removed, if it has a non-pending github
+// status from directorius it is set to pending.
 func (a *Autoupdater) InitSync(ctx context.Context) error {
 	for repo := range a.MonitoredRepositories {
 		err := a.sync(ctx, repo.OwnerLogin, repo.RepositoryName)
@@ -40,41 +42,47 @@ func (a *Autoupdater) InitSync(ctx context.Context) error {
 }
 
 func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
-	stats := syncStat{StartTime: time.Now()}
-
-	logger := a.Logger.With(
-		logfields.Repository(repo),
-		logfields.RepositoryOwner(owner),
-	)
+	fields := []zap.Field{logfields.Repository(repo), logfields.RepositoryOwner(owner)}
+	logger := a.Logger.With(fields...)
 
 	logger.Info("starting synchronization")
 
-	// TODO: could we query less pull requests by ignoring PRs that are
-	// closed and were last changed before goordinator started?
-	it := a.GitHubClient.ListPullRequests(ctx, owner, repo, "open", "asc", "created")
-	for {
-		var pr *github.PullRequest
+	it := a.GitHubClient.ListPRs(ctx, owner, repo)
+	next, stop := iter.Pull2(it)
+	defer stop()
 
-		// TODO: use a lower timeout for the retries, otherwise we might get stuck here for too long on startup
-		err := a.Retryer.Run(ctx, func(context.Context) error {
-			var err error
-			pr, err = it.Next()
+	stats := syncStat{StartTime: time.Now()}
+	hasMore := true
+	for {
+		var ghPR *githubclt.PR
+
+		err := a.Retryer.Run(ctx, func(context.Context) (err error) {
+			ghPR, err, hasMore = next()
 			return err
-		}, nil)
+		}, logfields.NewWith(fields, logfields.Operation("sync")))
 		if err != nil {
+			stop()
 			return err
 		}
-
-		if pr == nil { // iteration finished, no more results
+		if !hasMore {
 			break
 		}
 
 		stats.Seen++
 
-		// redefine variable, to make PR fields scoped to this iteration
-		logger := logger.With(logfields.PullRequest(pr.GetNumber()))
+		actions := a.evaluateActions(ghPR)
+		if len(actions) > 0 {
+			stats.PRsOutOfSync++
+		}
 
-		for _, action := range a.evaluateActions(pr) {
+		for _, action := range actions {
+			pr, err := NewPullRequest(ghPR.Number, ghPR.Branch, ghPR.Author, ghPR.Title, ghPR.Link)
+			if err != nil {
+				return fmt.Errorf("pr information retrieved from github is incomplete: %w", err)
+			}
+
+			logger = logger.With(pr.LogFields...)
+
 			switch action {
 			case unlabel:
 				err := a.removeLabel(ctx, owner, repo, pr)
@@ -83,45 +91,39 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 						"removing pull request label failed",
 						zap.Error(err),
 					)
+					continue
 				}
+				stats.Unlabeled++
 
 			case enqueue:
-				err := a.enqueuePR(ctx, owner, repo, pr)
+				err := a.enqueuePR(ctx, owner, repo, ghPR.BaseBranch, pr)
 				if errors.Is(err, ErrAlreadyExists) {
-					logger.Debug("queue in-sync, pr is enqueued")
+					logger.Debug("queue in-sync, pr is already enqueued")
 					break
 				}
 				if err != nil {
 					stats.Failures++
-					logger.Warn(
-						"adding pr to queue failed",
+					logger.Warn("adding pr to queue failed",
 						zap.Error(err),
 					)
 					break
 				}
 
 				stats.Enqueued++
-				logger.Info("queue was out of sync, enqueued pr")
+				logger.Info("enqueued pr")
 
-			case dequeue:
-				err := a.dequeuePR(ctx, owner, repo, pr)
-				if errors.Is(err, ErrNotFound) {
-					logger.Debug("queue in-sync, pr not queued",
-						zap.Error(err),
-					)
-					break
-				}
-
+			case resetStatusState:
+				err := createCommitStatus(ctx,
+					a.GitHubClient, logger, a.Retryer,
+					owner, repo, pr, ghPR.HeadCommit,
+					githubclt.StatePending,
+				)
 				if err != nil {
-					stats.Failures++
-					logger.Warn("dequeing pull request failed",
-						zap.Error(err),
-					)
-					break
+					logger.Warn("setting github status state failed", zap.Error(err))
+					continue
 				}
 
-				stats.Dequeued++
-				logger.Info("queue was out of sync, pr dequeued")
+				stats.StatusStateReset++
 
 			default:
 				logger.DPanic(
@@ -141,76 +143,45 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 	return nil
 }
 
-func (a *Autoupdater) enqueuePR(ctx context.Context, repoOwner, repo string, ghPr *github.PullRequest) error {
-	bb, err := NewBaseBranch(repoOwner, repo, ghPr.GetBase().GetRef())
+func (a *Autoupdater) enqueuePR(ctx context.Context, repoOwner, repo, baseBranch string, pr *PullRequest) error {
+	bb, err := NewBaseBranch(repoOwner, repo, baseBranch)
 	if err != nil {
 		return fmt.Errorf("incomplete base branch information: %w", err)
-	}
-
-	pr, err := NewPullRequest(ghPr.GetNumber(), ghPr.GetHead().GetRef(), ghPr.GetUser().GetLogin(), ghPr.GetTitle(), ghPr.GetLinks().GetHTML().GetHRef())
-	if err != nil {
-		return fmt.Errorf("incomplete pr information: %w", err)
 	}
 
 	return a.Enqueue(ctx, bb, pr)
 }
 
-func (a *Autoupdater) dequeuePR(ctx context.Context, repoOwner, repo string, ghPr *github.PullRequest) error {
-	bb, err := NewBaseBranch(repoOwner, repo, ghPr.GetBase().GetRef())
-	if err != nil {
-		return fmt.Errorf("incomplete base branch information: %w", err)
-	}
-
-	prNumber := ghPr.GetNumber()
-	if prNumber <= 0 {
-		return fmt.Errorf("invalid pr number: %d", prNumber)
-	}
-
-	_, err = a.Dequeue(ctx, bb, prNumber)
-	return err
-}
-
-func (a *Autoupdater) removeLabel(ctx context.Context, repoOwner, repo string, ghPr *github.PullRequest) error {
-	pr, err := NewPullRequestFromEvent(ghPr)
-	if err != nil {
-		return err
-	}
-
+func (a *Autoupdater) removeLabel(ctx context.Context, repoOwner, repo string, pr *PullRequest) error {
 	return a.Retryer.Run(ctx, func(ctx context.Context) error {
 		return a.GitHubClient.RemoveLabel(ctx,
 			repoOwner, repo, pr.Number,
 			a.HeadLabel,
 		)
-	}, append(pr.LogFields, logfields.Operation("github_remove_label")))
+	}, logfields.NewWith(pr.LogFields, logfields.Operation("github_remove_label")))
 }
 
-func (a *Autoupdater) evaluateActions(pr *github.PullRequest) []syncAction {
+func (a *Autoupdater) evaluateActions(pr *githubclt.PR) []syncAction {
 	var result []syncAction
 
 	for _, label := range pr.Labels {
-		if label.GetName() == a.HeadLabel {
+		switch {
+		case label == a.HeadLabel:
 			result = append(result, unlabel)
+		case a.TriggerLabels.Contains(label):
+			result = append(result, enqueue)
 		}
 	}
 
-	if pr.GetState() == "closed" {
-		return append(result, dequeue)
+	if pr.AutoMergeEnabled && a.TriggerOnAutomerge {
+		result = append(result, enqueue)
 	}
 
-	if a.TriggerOnAutomerge && pr.GetAutoMerge() != nil {
-		return append(result, enqueue)
-	}
-
-	if len(a.TriggerLabels) != 0 {
-		for _, label := range pr.Labels {
-			labelName := label.GetName()
-			if _, exist := a.TriggerLabels[labelName]; exist {
-				return append(result, enqueue)
-			}
+	for _, status := range pr.Statuses {
+		if status.Context == githubStatusContext && status.State != githubclt.StatePending {
+			result = append(result, resetStatusState)
 		}
-
-		return append(result, dequeue)
 	}
 
-	return nil
+	return result
 }

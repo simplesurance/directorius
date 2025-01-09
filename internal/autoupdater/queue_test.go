@@ -32,6 +32,8 @@ func TestUpdatePR_DoesNotCallBaseBranchUpdateIfPRIsNotApproved(t *testing.T) {
 	pr, err := NewPullRequest(1, "testbr", "fho", "test pr", "")
 	require.NoError(t, err)
 
+	mockCreateHeadCommitStatusPendingPRNr(ghClient, pr.Number).Times(1)
+
 	_, added := q.active.InsertIfNotExist(pr.Number, pr)
 	require.True(t, added)
 

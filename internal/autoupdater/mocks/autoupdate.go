@@ -11,6 +11,7 @@ package mocks
 
 import (
 	context "context"
+	iter "iter"
 	reflect "reflect"
 
 	githubclt "github.com/simplesurance/directorius/internal/githubclt"
@@ -56,6 +57,34 @@ func (mr *MockGithubClientMockRecorder) AddLabel(ctx, owner, repo, pullRequestOr
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddLabel", reflect.TypeOf((*MockGithubClient)(nil).AddLabel), ctx, owner, repo, pullRequestOrIssueNumber, label)
 }
 
+// CreateCommitStatus mocks base method.
+func (m *MockGithubClient) CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateCommitStatus", ctx, owner, repo, commit, state, description, context)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CreateCommitStatus indicates an expected call of CreateCommitStatus.
+func (mr *MockGithubClientMockRecorder) CreateCommitStatus(ctx, owner, repo, commit, state, description, context any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateCommitStatus", reflect.TypeOf((*MockGithubClient)(nil).CreateCommitStatus), ctx, owner, repo, commit, state, description, context)
+}
+
+// CreateHeadCommitStatus mocks base method.
+func (m *MockGithubClient) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateHeadCommitStatus", ctx, owner, repo, pullRequestNumber, state, description, context)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CreateHeadCommitStatus indicates an expected call of CreateHeadCommitStatus.
+func (mr *MockGithubClientMockRecorder) CreateHeadCommitStatus(ctx, owner, repo, pullRequestNumber, state, description, context any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateHeadCommitStatus", reflect.TypeOf((*MockGithubClient)(nil).CreateHeadCommitStatus), ctx, owner, repo, pullRequestNumber, state, description, context)
+}
+
 // CreateIssueComment mocks base method.
 func (m *MockGithubClient) CreateIssueComment(ctx context.Context, owner, repo string, issueOrPRNr int, comment string) error {
 	m.ctrl.T.Helper()
@@ -70,18 +99,18 @@ func (mr *MockGithubClientMockRecorder) CreateIssueComment(ctx, owner, repo, iss
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateIssueComment", reflect.TypeOf((*MockGithubClient)(nil).CreateIssueComment), ctx, owner, repo, issueOrPRNr, comment)
 }
 
-// ListPullRequests mocks base method.
-func (m *MockGithubClient) ListPullRequests(ctx context.Context, owner, repo, state, sort, sortDirection string) githubclt.PRIterator {
+// ListPRs mocks base method.
+func (m *MockGithubClient) ListPRs(ctx context.Context, owner, repo string) iter.Seq2[*githubclt.PR, error] {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPullRequests", ctx, owner, repo, state, sort, sortDirection)
-	ret0, _ := ret[0].(githubclt.PRIterator)
+	ret := m.ctrl.Call(m, "ListPRs", ctx, owner, repo)
+	ret0, _ := ret[0].(iter.Seq2[*githubclt.PR, error])
 	return ret0
 }
 
-// ListPullRequests indicates an expected call of ListPullRequests.
-func (mr *MockGithubClientMockRecorder) ListPullRequests(ctx, owner, repo, state, sort, sortDirection any) *gomock.Call {
+// ListPRs indicates an expected call of ListPRs.
+func (mr *MockGithubClientMockRecorder) ListPRs(ctx, owner, repo any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPullRequests", reflect.TypeOf((*MockGithubClient)(nil).ListPullRequests), ctx, owner, repo, state, sort, sortDirection)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPRs", reflect.TypeOf((*MockGithubClient)(nil).ListPRs), ctx, owner, repo)
 }
 
 // ReadyForMerge mocks base method.

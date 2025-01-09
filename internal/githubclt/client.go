@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +22,12 @@ const DefaultHTTPClientTimeout = time.Minute
 
 const loggerName = "github_client"
 
-var ErrPullRequestIsClosed = errors.New("pull request is closed")
+const (
+	StatePending = "pending"
+	StateSuccess = "success"
+	StateError   = "error"
+	StateFailure = "failure"
+)
 
 // New returns a new github api client.
 func New(oauthAPItoken string) *Client {
@@ -252,124 +255,34 @@ func (clt *Client) RemoveLabel(ctx context.Context, owner, repo string, pullRequ
 	return nil
 }
 
-type PRIterator interface {
-	Next() (*github.PullRequest, error)
-}
-
-type PRIter struct {
-	clt *Client
-
-	ctx   context.Context
-	owner string
-	repo  string
-
-	filterState   string
-	sortOrder     string
-	sortDirection string
-
-	unseen []*github.PullRequest
-
-	nextPage int
-	finished bool
-}
-
-// Next returns the next pullRequest.
-// When the last result was returned a nil PullRequest is returned.
-func (it *PRIter) Next() (*github.PullRequest, error) {
-	if len(it.unseen) > 0 {
-		result := it.unseen[0]
-		it.unseen = it.unseen[1:]
-
-		return result, nil
-	}
-
-	if it.finished {
-		return nil, nil
-	}
-
-	prs, resp, err := it.clt.restClt.PullRequests.List(it.ctx, it.owner, it.repo, &github.PullRequestListOptions{
-		State:     "open",
-		Sort:      it.filterState,
-		Direction: it.sortOrder,
-		ListOptions: github.ListOptions{
-			Page:    it.nextPage,
-			PerPage: 100,
-		},
+// CreateCommitStatus submits a status for a commit.
+// state must be one of [StatePending], [StateSuccess], [StateError], [StateFailure].
+func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error {
+	_, _, err := clt.restClt.Repositories.CreateStatus(ctx, owner, repo, commit, &github.RepoStatus{
+		State:       &state,
+		Description: &description,
+		Context:     &context,
 	})
+	return clt.wrapRetryableErrors(err)
+}
+
+// CreateCommitStatus submits a status for the HEAD commit of a pull request branch.
+// state must be one of [StatePending], [StateSuccess], [StateError], [StateFailure].
+func (clt *Client) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error {
+	pr, _, err := clt.restClt.PullRequests.Get(ctx, owner, repo, pullRequestNumber)
 	if err != nil {
-		return nil, it.clt.wrapRetryableErrors(err)
+		return clt.wrapRetryableErrors(err)
 	}
 
-	if resp.NextPage == 0 || resp.PrevPage+1 == resp.LastPage || len(prs) == 0 {
-		it.finished = true
-	} else {
-		it.nextPage = resp.NextPage
+	prHead := pr.GetHead()
+	if prHead == nil {
+		return errors.New("got pull request object with empty head")
 	}
 
-	it.unseen = prs
-
-	return it.Next()
-}
-
-// ListPullRequests returns an iterator for receiving all pull requests.
-// The parameters state, sort, sortDirection expect the same values then their pendants in the struct github.PullRequestListOptions.
-// all pull requests should be returned.
-func (clt *Client) ListPullRequests(ctx context.Context, owner, repo, state, sort, sortDirection string) PRIterator { // interface is returned to make the method mockable
-	return &PRIter{
-		clt:           clt,
-		ctx:           ctx,
-		owner:         owner,
-		repo:          repo,
-		sortOrder:     sort,
-		sortDirection: sortDirection,
-		filterState:   state,
-		nextPage:      1,
-	}
-}
-
-func (clt *Client) wrapRetryableErrors(err error) error {
-	switch v := err.(type) { // nolint:errorlint // errors.As not needed here
-	case *github.RateLimitError:
-		clt.logger.Info(
-			"rate limit exceeded",
-			zap.Int("github_api_rate_limit", v.Rate.Limit),
-			zap.Int("github_api_rate_limit", v.Rate.Limit),
-			zap.Time("github_api_rate_limit_reset_time", v.Rate.Reset.Time),
-		)
-
-		return goorderr.NewRetryableError(err, v.Rate.Reset.Time)
-
-	case *github.ErrorResponse:
-		if v.Response.StatusCode >= 500 && v.Response.StatusCode < 600 {
-			return goorderr.NewRetryableAnytimeError(err)
-		}
+	prHeadSHA := prHead.GetSHA()
+	if prHeadSHA == "" {
+		return errors.New("got pull request object with empty head sha")
 	}
 
-	return err
-}
-
-var graphQlHTTPStatusErrRe = regexp.MustCompile(`^non-200 OK status code: ([0-9]+) .*`)
-
-func (clt *Client) wrapGraphQLRetryableErrors(err error) error {
-	matches := graphQlHTTPStatusErrRe.FindStringSubmatch(err.Error())
-	if len(matches) != 2 {
-		return err
-	}
-
-	errcode, atoiErr := strconv.Atoi(matches[1])
-	if atoiErr != nil {
-		clt.logger.Info(
-			"parsing http code from error string failed",
-			zap.Error(atoiErr),
-			zap.String("error_string", err.Error()),
-			zap.String("http_errcode", matches[1]),
-		)
-		return err
-	}
-
-	if errcode >= 500 && errcode < 600 {
-		return goorderr.NewRetryableAnytimeError(err)
-	}
-
-	return err
+	return clt.CreateCommitStatus(ctx, owner, repo, prHeadSHA, state, description, context)
 }

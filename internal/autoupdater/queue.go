@@ -38,6 +38,8 @@ const (
 
 const updateBranchPollInterval = 2 * time.Second
 
+const githubStatusContext = "directorius"
+
 // queue implements a queue for automatically updating pull request branches
 // with their base branch.
 // Enqueued pull requests can either be in active or suspended state.
@@ -304,7 +306,7 @@ func (q *queue) _dequeueActive(prNumber int) (removedPR, newFirstPr *PullRequest
 // suspended list.
 // If an update operation is currently running for it, it is canceled.
 // If the pull request does not exist in the queue, ErrNotFound is returned.
-func (q *queue) Dequeue(prNumber int) (*PullRequest, error) {
+func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest, error) {
 	q.lock.Lock()
 
 	if pr, err := q._dequeueSuspended(prNumber); err == nil {
@@ -334,6 +336,9 @@ func (q *queue) Dequeue(prNumber int) (*PullRequest, error) {
 		removed.LogFields...)
 
 	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", removed)
+	if setPendingStatusState {
+		q.prCreateCommitStatus(context.Background(), removed, "", githubclt.StatePending)
+	}
 
 	if newFirstElem == nil {
 		return removed, nil
@@ -378,6 +383,7 @@ func (q *queue) Suspend(prNumber int) error {
 		pr.LogFields...,
 	)
 	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", pr)
+	q.prCreateCommitStatus(context.Background(), pr, "", githubclt.StatePending)
 
 	if newFirstElem == nil {
 		return nil
@@ -642,6 +648,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 	switch status.CIStatus {
 	case githubclt.CIStatusSuccess:
+		q.prCreateCommitStatus(ctx, pr, updateHeadCommit, githubclt.StateSuccess)
 		logger.Info("pull request is uptodate, approved and status checks are successful")
 
 	case githubclt.CIStatusPending:
@@ -761,7 +768,7 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 				zap.Error(updateBranchErr),
 			)
 
-			if _, err := q.Dequeue(pr.Number); err != nil {
+			if _, err := q.Dequeue(pr.Number, true); err != nil {
 				logger.Error("removing pr from queue after failed update failed",
 					zap.Error(err),
 				)
@@ -927,6 +934,88 @@ func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr
 		append([]zapcore.Field{
 			zap.String("github_label", q.headLabel),
 		}, pr.LogFields...)...)
+}
+
+func (q *queue) prCreateCommitStatus(
+	ctx context.Context, pr *PullRequest, commit, state string,
+) {
+	err := createCommitStatus(ctx,
+		q.ghClient, q.logger, q.retryer,
+		q.baseBranch.RepositoryOwner, q.baseBranch.Repository,
+		pr, commit,
+		state,
+	)
+	if err != nil {
+		q.logger.Error("creating github commit status failed",
+			logfields.NewWith(pr.LogFields, zap.Error(err))...)
+	}
+}
+
+func createCommitStatus(
+	ctx context.Context,
+	clt GithubClient,
+	logger *zap.Logger,
+	retryer Retryer,
+	repositoryOwner, repository string,
+	pr *PullRequest,
+	commit, state string,
+) error {
+	var desc string
+
+	/* It is not sufficient to only set the state to pending when we
+	previously set the state to successful, because the successful state
+	might have been set by another PR that contains the same commit. To
+	account for it we would need to store per commit which status has been
+	submitted in the past. It is questionable if it is worth the additional
+	complexity. Therefore we always set the pending status state.
+	*/
+
+	lf := logfields.NewWith(pr.LogFields,
+		zap.String("github.status.state", state),
+		zap.String("github.status.description", desc),
+		zap.String("github.status.context", githubStatusContext),
+	)
+	if commit != "" {
+		lf = append(lf, logfields.Commit(commit))
+	}
+
+	pr.GithubStatusLock.Lock()
+	defer pr.GithubStatusLock.Unlock()
+
+	if state == githubclt.StatePending {
+		desc = "first in merge queue"
+	}
+
+	if pr.GithubStatusLastSetState.Commit == commit && pr.GithubStatusLastSetState.State == state {
+		logger.Debug("skipping setting github status state, state has already been reported for the commit")
+		return nil
+	}
+
+	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
+	defer cancelFunc()
+
+	err := retryer.Run(ctx, func(ctx context.Context) error {
+		if commit == "" {
+			return clt.CreateHeadCommitStatus(ctx,
+				repositoryOwner, repository, pr.Number,
+				state, desc, githubStatusContext,
+			)
+		}
+		return clt.CreateCommitStatus(ctx,
+			repositoryOwner, repository, commit,
+			state, desc, githubStatusContext,
+		)
+	}, logfields.NewWith(lf, logfields.Operation("github.create_commit_status")))
+	if err != nil {
+		return err
+	}
+
+	logger.Info("created github commit status", lf...)
+
+	pr.GithubStatusLastSetState.Commit = commit
+	pr.GithubStatusLastSetState.State = state
+
+	return nil
 }
 
 // ActivePRsByBranch returns all pull requests that are in active state and for

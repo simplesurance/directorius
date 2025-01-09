@@ -18,7 +18,6 @@ import (
 
 	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
-	gh_mocks "github.com/simplesurance/directorius/internal/githubclt/mocks"
 	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
@@ -49,6 +48,42 @@ func mockSuccessfulGithubRemoveLabelQueueHeadCall(clt *mocks.MockGithubClient, e
 		EXPECT().
 		RemoveLabel(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(expectedPRNr), gomock.Eq(queueHeadLabel)).
 		Return(nil)
+}
+
+func mockCreateHeadCommitStatusPendingPRNr(clt *mocks.MockGithubClient, prNr int) *gomock.Call {
+	return clt.EXPECT().
+		CreateHeadCommitStatus(
+			gomock.All(),
+			gomock.Eq(repoOwner), gomock.Eq(repo),
+			gomock.Eq(prNr),
+			gomock.Eq(githubclt.StatePending),
+			gomock.Any(),
+			gomock.Eq(githubStatusContext),
+		)
+}
+
+func mockCreateHeadCommitStatusPending(clt *mocks.MockGithubClient) *gomock.Call {
+	return clt.EXPECT().
+		CreateHeadCommitStatus(
+			gomock.All(),
+			gomock.Eq(repoOwner), gomock.Eq(repo),
+			gomock.Not(nil),
+			gomock.Eq(githubclt.StatePending),
+			gomock.Any(),
+			gomock.Eq(githubStatusContext),
+		)
+}
+
+func mockCreateCommitStatusSuccessful(clt *mocks.MockGithubClient) *gomock.Call {
+	return clt.EXPECT().
+		CreateCommitStatus(
+			gomock.All(),
+			gomock.Eq(repoOwner), gomock.Eq(repo),
+			gomock.Eq(headCommitID),
+			gomock.Eq(githubclt.StateSuccess),
+			gomock.Any(),
+			gomock.Eq(githubStatusContext),
+		)
 }
 
 func mockCIBuildWithCallCnt(clt *mocks.MockCIClient) *atomic.Uint32 {
@@ -293,6 +328,8 @@ func TestPushToBaseBranchResumesPRs(t *testing.T) {
 	mockFailedGithubUpdateBranchCall(ghClient, prNumber)
 	mockSuccesssfulCreateIssueCommentCall(ghClient, prNumber)
 
+	mockCreateHeadCommitStatusPending(ghClient).Times(1)
+
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 
 	autoupdater := newAutoupdater(
@@ -349,6 +386,7 @@ func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(2)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
+	mockCreateHeadCommitStatusPending(ghClient).Times(1)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -418,6 +456,7 @@ func TestUnlabellingPRDequeuesPR(t *testing.T) {
 	)
 
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
+	mockCreateHeadCommitStatusPendingPRNr(ghClient, prNumber)
 
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -461,6 +500,7 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
+	mockCreateHeadCommitStatusPending(ghClient).Times(1)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -596,6 +636,29 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 				RemoveLabel(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any(), gomock.Eq(queueHeadLabel)).
 				Return(nil).
 				AnyTimes()
+
+			ghClient.
+				EXPECT().
+				CreateHeadCommitStatus(
+					gomock.Any(),
+					gomock.Eq(repoOwner),
+					gomock.Eq(repo),
+					gomock.Any(),
+					gomock.Eq(githubclt.StatePending),
+					gomock.Any(),
+					gomock.Eq(githubStatusContext),
+				).AnyTimes()
+			ghClient.
+				EXPECT().
+				CreateCommitStatus(
+					gomock.Any(),
+					gomock.Eq(repoOwner),
+					gomock.Eq(repo),
+					gomock.Any(),
+					gomock.Eq(githubclt.StateSuccess),
+					gomock.Any(),
+					gomock.Eq(githubStatusContext),
+				).AnyTimes()
 
 			autoupdater := newAutoupdater(
 				ghClient,
@@ -751,6 +814,18 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 				Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID}, nil).
 				AnyTimes()
 
+			ghClient.
+				EXPECT().
+				CreateCommitStatus(
+					gomock.Any(),
+					gomock.Eq(repoOwner),
+					gomock.Eq(repo),
+					gomock.Any(),
+					gomock.Any(),
+					gomock.Any(),
+					gomock.Eq(githubStatusContext),
+				).AnyTimes()
+
 			autoupdater := newAutoupdater(
 				ghClient,
 				ciClient,
@@ -759,6 +834,9 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 				true,
 				nil,
 			)
+
+			mockCreateHeadCommitStatusPending(ghClient).AnyTimes()
+			mockCreateCommitStatusSuccessful(ghClient).AnyTimes()
 
 			autoupdater.Start()
 			t.Cleanup(autoupdater.Stop)
@@ -834,6 +912,7 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
+	mockCreateHeadCommitStatusPending(ghClient).Times(1)
 
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -910,6 +989,7 @@ func TestPRIsSuspendedWhenUptodateAndHasFailedStatus(t *testing.T) {
 			mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).Times(1)
 
 			mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
+			mockCreateHeadCommitStatusPending(ghClient).Times(1)
 
 			mockReadyForMergeStatus(
 				ghClient, 1,
@@ -959,6 +1039,7 @@ func TestEnqueueDequeueByAutomergeEvents(t *testing.T) {
 	).AnyTimes()
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
+	mockCreateHeadCommitStatusPendingPRNr(ghClient, prNumber)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1003,12 +1084,6 @@ func TestInitialSync(t *testing.T) {
 		Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID}, nil).
 		AnyTimes()
 
-	prIterNone := gh_mocks.NewMockPRIterator(mockctrl)
-	ghClient.
-		EXPECT().
-		ListPullRequests(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(prIterNone)
-
 	mockReadyForMergeStatus(
 		ghClient, 1,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
@@ -1018,26 +1093,11 @@ func TestInitialSync(t *testing.T) {
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).AnyTimes()
 
-	ghClient.
-		EXPECT().
-		AddLabel(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any(), gomock.Eq(queueHeadLabel)).
-		Return(nil).
-		AnyTimes()
-	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, 5).Times(1)
-
 	ciClient.
 		EXPECT().
 		Build(gomock.Any(), gomock.Any()).
 		AnyTimes()
 	mockGetBuildFromQueueItemID(ciClient).AnyTimes()
-
-	prAutoMergeEnabled := newBasicPullRequest(1, "main", "pr1")
-	prAutoMergeEnabled.AutoMerge = &github.PullRequestAutoMerge{}
-
-	prWithTriggerLabel := newBasicPullRequest(2, "main", "pr2")
-	prWithTriggerLabel.Labels = []*github.Label{{Name: strPtr("queue-add")}}
-
-	prWithoutTrigger := newBasicPullRequest(3, "main", "pr3")
 
 	prBasedOnOtherPR2 := newBasicPullRequest(4, "pr3", "pr4")
 	prBasedOnOtherPR2.AutoMerge = &github.PullRequestAutoMerge{}
@@ -1045,28 +1105,64 @@ func TestInitialSync(t *testing.T) {
 	prWithQueueHeadLabel := newBasicPullRequest(5, "main", "pr5")
 	prWithQueueHeadLabel.Labels = []*github.Label{{Name: strPtr(queueHeadLabel)}}
 
-	syncPRRequestsRet := []*github.PullRequest{
-		prAutoMergeEnabled,
-		prWithTriggerLabel,
-		prWithoutTrigger,
-		prBasedOnOtherPR2,
-		prWithQueueHeadLabel,
+	syncPRRequestsRet := []*githubclt.PR{
+		{
+			Number:           1,
+			AutoMergeEnabled: true,
+			Branch:           "pr1",
+			BaseBranch:       "main",
+		},
+		{
+			Number:     2,
+			Labels:     []string{"queue-add", "hello"},
+			Branch:     "pr2",
+			BaseBranch: "main",
+		},
+		{
+			Number:     3,
+			Branch:     "pr",
+			BaseBranch: "main",
+		},
+		{
+			Number:           4,
+			Branch:           "pr3",
+			BaseBranch:       "p2",
+			AutoMergeEnabled: true,
+			Labels:           []string{"abc"},
+		},
+		{
+			Number:     4,
+			Branch:     "pr4",
+			BaseBranch: "main",
+			Labels:     []string{queueHeadLabel},
+		},
 	}
 
-	prIterNone.
+	ghClient.
 		EXPECT().
-		Next().
-		DoAndReturn(func() (*github.PullRequest, error) {
-			if len(syncPRRequestsRet) == 0 {
-				return nil, nil
-			}
+		ListPRs(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo)).
+		Return(
+			func(yield func(*githubclt.PR, error) bool) {
+				for {
+					if len(syncPRRequestsRet) == 0 {
+						return
+					}
+					result := syncPRRequestsRet[0]
+					syncPRRequestsRet = syncPRRequestsRet[1:]
 
-			result := syncPRRequestsRet[0]
-			syncPRRequestsRet = syncPRRequestsRet[1:]
+					if !yield(result, nil) {
+						return
+					}
+				}
+			}).Times(1)
 
-			return result, nil
-		}).
-		Times(len(syncPRRequestsRet) + 1)
+	ghClient.
+		EXPECT().
+		AddLabel(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any(), gomock.Eq(queueHeadLabel)).
+		Return(nil).
+		AnyTimes()
+
+	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, 4).Times(1)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1090,7 +1186,7 @@ func TestInitialSync(t *testing.T) {
 	assert.Nil(t, q.active.Get(3), "pr3 was added to the queue but should not")
 	q.lock.Unlock()
 
-	q = autoupdater.getQueue(&BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "pr3"})
+	q = autoupdater.getQueue(&BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "p2"})
 	require.NotNil(t, q)
 	q.lock.Lock()
 	assert.NotNil(t, q.active.Get(4), "pr4 was not added to the queue")
@@ -1164,6 +1260,10 @@ func TestReviewApprovedEventResumesSuspendedPR(t *testing.T) {
 	mockStatusReturn.AnyTimes()
 
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
+	gomock.InOrder(
+		mockCreateHeadCommitStatusPending(ghClient).Times(1),
+		mockCreateCommitStatusSuccessful(ghClient).Times(1),
+	)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1218,6 +1318,7 @@ func TestDismissingApprovalSuspendsActivePR(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).Times(1)
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
+	mockCreateHeadCommitStatusPending(ghClient)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1270,6 +1371,7 @@ func TestRequestingReviewChangesSuspendsPR(t *testing.T) {
 	mockStatusReturn.AnyTimes()
 
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, true).Times(1)
+	mockCreateHeadCommitStatusPending(ghClient)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1332,6 +1434,7 @@ func TestUpdatesAreResumedIfTestsFailAndBaseIsUpdated(t *testing.T) {
 	)
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(0) // CI status is never pending
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
+	mockCreateHeadCommitStatusPending(ghClient).Times(1)
 
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -1351,6 +1454,7 @@ func TestUpdatesAreResumedIfTestsFailAndBaseIsUpdated(t *testing.T) {
 	waitForProcessedEventCnt(t, autoupdater, 2)
 	assert.Equal(t, 1, queue.activeLen())
 	assert.Empty(t, queue.suspended)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
 }
 
 func TestBaseBranchUpdatesBlockUntilFinished(t *testing.T) {
@@ -1415,7 +1519,7 @@ func TestBaseBranchUpdatesBlockUntilFinished(t *testing.T) {
 	}, queue.updateBranchPollInterval+2*time.Second, queue.updateBranchPollInterval/2)
 }
 
-func TestPRHeadLabelIsAppliedToNextAfterMerge(t *testing.T) {
+func TestPRHeadLabelIsAppliedToNextAfterClose(t *testing.T) {
 	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
 	evChan := make(chan *github_prov.Event, 1)
 	defer close(evChan)
@@ -1461,6 +1565,7 @@ func TestPRHeadLabelIsAppliedToNextAfterMerge(t *testing.T) {
 		ghClient, pr1Number,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusSuccess,
 	).MinTimes(1)
+	mockCreateCommitStatusSuccessful(ghClient).Times(1)
 
 	evChan <- &github_prov.Event{Event: newSyncEvent(pr1Number, pr1Branch, baseBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 3)
@@ -1469,6 +1574,7 @@ func TestPRHeadLabelIsAppliedToNextAfterMerge(t *testing.T) {
 		ghClient, pr2Number,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).MinTimes(1)
+	mockCreateHeadCommitStatusPendingPRNr(ghClient, pr1Number).Times(1)
 
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, pr1Number).Times(1)
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr2Number).Times(1)
@@ -1589,24 +1695,32 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 	type testcase struct {
 		CIStatus githubclt.CIStatus
 
-		ExpectedCICalls       int
-		ExpectedAddLabelCalls int
+		ExpectedCICalls                       int
+		ExpectedAddLabelCalls                 int
+		ExpectedSetCommitStateSuccessfulCalls int
+		ExpectedSetCommitStatePendingCalls    int
 	}
 	tcs := []testcase{
 		{
-			CIStatus:              githubclt.CIStatusPending,
-			ExpectedCICalls:       1,
-			ExpectedAddLabelCalls: 1,
+			CIStatus:                              githubclt.CIStatusPending,
+			ExpectedCICalls:                       1,
+			ExpectedAddLabelCalls:                 1,
+			ExpectedSetCommitStateSuccessfulCalls: 0,
+			ExpectedSetCommitStatePendingCalls:    0,
 		},
 		{
-			CIStatus:              githubclt.CIStatusFailure,
-			ExpectedCICalls:       0,
-			ExpectedAddLabelCalls: 0,
+			CIStatus:                              githubclt.CIStatusFailure,
+			ExpectedCICalls:                       0,
+			ExpectedAddLabelCalls:                 0,
+			ExpectedSetCommitStateSuccessfulCalls: 0,
+			ExpectedSetCommitStatePendingCalls:    1,
 		},
 		{
-			CIStatus:              githubclt.CIStatusSuccess,
-			ExpectedCICalls:       0,
-			ExpectedAddLabelCalls: 0,
+			CIStatus:                              githubclt.CIStatusSuccess,
+			ExpectedCICalls:                       0,
+			ExpectedAddLabelCalls:                 0,
+			ExpectedSetCommitStateSuccessfulCalls: 1,
+			ExpectedSetCommitStatePendingCalls:    0,
 		},
 	}
 
@@ -1642,6 +1756,9 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 			mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).MaxTimes(1)
 			ciClient.EXPECT().Build(gomock.Any(), gomock.Any()).Times(tc.ExpectedCICalls)
 			mockGetBuildFromQueueItemID(ciClient).Times(tc.ExpectedCICalls)
+
+			mockCreateHeadCommitStatusPending(ghClient).Times(tc.ExpectedSetCommitStatePendingCalls)
+			mockCreateCommitStatusSuccessful(ghClient).Times(tc.ExpectedSetCommitStateSuccessfulCalls)
 
 			autoupdater := newAutoupdater(
 				ghClient,
@@ -1844,4 +1961,56 @@ func TestPauseResumeQueue(t *testing.T) {
 	evChan <- &github_prov.Event{Event: newPushEvent(baseBranch.Branch)}
 	waitForProcessedEventCnt(t, autoupdater, 3)
 	waitForQueueUpdateRunsGreaterThan(t, queue, 3)
+}
+
+func TestSuccessfulStatusStateIsOnlySetOnce(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	evChan := make(chan *github_prov.Event, 1)
+	t.Cleanup(func() { close(evChan) })
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockCIClient(mockctrl)
+
+	prNumber := 1
+	prBranch := "pr_branch"
+	baseBranch := "main"
+
+	ghClient.
+		EXPECT().
+		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
+		DoAndReturn(func(context.Context, string, string, int) (*githubclt.UpdateBranchResult, error) {
+			return &githubclt.UpdateBranchResult{
+				HeadCommitID: headCommitID,
+			}, nil
+		}).Times(2)
+
+	mockReadyForMergeStatus(
+		ghClient, prNumber,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusSuccess,
+	).Times(2)
+
+	mockCreateCommitStatusSuccessful(ghClient).Times(1)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: "here"}}
+
+	autoupdater.Start()
+	t.Cleanup(autoupdater.Stop)
+
+	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 1)
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
+	require.NotNil(t, queue)
+	queue.ScheduleUpdate(context.Background(), TaskNone)
+
+	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
 }

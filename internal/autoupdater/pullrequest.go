@@ -41,6 +41,14 @@ type PullRequest struct {
 
 	stateUnchangedSince time.Time
 	lock                sync.Mutex // must be held when accessing stateUnchangedSince
+
+	GithubStatusLastSetState ReportedStatusState
+	GithubStatusLock         sync.Mutex
+}
+
+type ReportedStatusState struct {
+	Commit string
+	State  string
 }
 
 func NewPullRequestFromEvent(ev *github.PullRequest) (*PullRequest, error) {

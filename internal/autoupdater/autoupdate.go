@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,12 +25,14 @@ const defPeriodicTriggerInterval = 30 * time.Minute
 // GithubClient defines the methods of a Github API Client that are used by the
 // autoupdater implementation.
 type GithubClient interface {
-	UpdateBranch(ctx context.Context, owner, repo string, pullRequestNumber int) (*githubclt.UpdateBranchResult, error)
+	AddLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
+	CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error
+	CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error
 	CreateIssueComment(ctx context.Context, owner, repo string, issueOrPRNr int, comment string) error
-	ListPullRequests(ctx context.Context, owner, repo, state, sort, sortDirection string) githubclt.PRIterator
+	ListPRs(ctx context.Context, owner, repo string) iter.Seq2[*githubclt.PR, error]
 	ReadyForMerge(ctx context.Context, owner, repo string, prNumber int) (*githubclt.ReadyForMergeStatus, error)
 	RemoveLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
-	AddLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
+	UpdateBranch(ctx context.Context, owner, repo string, pullRequestNumber int) (*githubclt.UpdateBranchResult, error)
 }
 
 // Retryer defines methods for running GithubClient operations repeatedly if they fail with a temporary error.
@@ -234,9 +237,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 	switch ev := event.Event.(type) {
 	case *github.PullRequestEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for unmonitored repository",
-			)
+			logger.Debug("event is for unmonitored repository")
 
 			return
 		}
@@ -245,9 +246,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.PushEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for repository that is not monitored",
-			)
+			logger.Debug("event is for repository that is not monitored")
 
 			return
 		}
@@ -256,9 +255,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.StatusEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for repository that is not monitored",
-			)
+			logger.Debug("event is for repository that is not monitored")
 
 			return
 		}
@@ -267,9 +264,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.CheckRunEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for repository that is not monitored",
-			)
+			logger.Debug("event is for repository that is not monitored")
 
 			return
 		}
@@ -277,9 +272,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.PullRequestReviewEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug(
-				"event is for repository that is not monitored",
-			)
+			logger.Debug("event is for repository that is not monitored")
 
 			return
 		}
@@ -462,7 +455,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			return
 		}
 
-		pr, err = a.Dequeue(ctx, bb, pr.Number)
+		pr, err = a.Dequeue(ctx, bb, pr.Number, !ev.PullRequest.GetMerged())
 		if err != nil {
 			logError(
 				logger,
@@ -471,6 +464,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			)
 			return
 		}
+
 		if ev.PullRequest.GetMerged() {
 			metrics.RecordTimeToMerge(time.Since(pr.EnqueuedAt), owner, repo)
 		}
@@ -520,7 +514,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			return
 		}
 
-		_, err = a.Dequeue(ctx, bb, pr.Number)
+		_, err = a.Dequeue(ctx, bb, pr.Number, true)
 		if err != nil {
 			logError(logger, "ignoring event, disabling updates for pr failed", err)
 
@@ -933,11 +927,10 @@ func (a *Autoupdater) Enqueue(_ context.Context, baseBranch *BaseBranch, pr *Pul
 }
 
 // Dequeue removes the pull request with number prNumber from the autoupdate queue of baseBranch.
-// This disables keeping the pull request update with baseBranch.
 // If no pull request is queued with prNumber an ErrNotFound error is returned.
 //
 // If the pull request was the only element in the baseBranch queue, the queue is removed.
-func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumber int) (*PullRequest, error) {
+func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumber int, setPendingStatusState bool) (*PullRequest, error) {
 	var q *queue
 	var exist bool
 
@@ -949,7 +942,7 @@ func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 		return nil, fmt.Errorf("no queue for base branch exist: %w", ErrNotFound)
 	}
 
-	pr, err := q.Dequeue(prNumber)
+	pr, err := q.Dequeue(prNumber, setPendingStatusState)
 	if err != nil {
 		return nil, fmt.Errorf("disabling updates for pr failed: %w", err)
 	}
@@ -1054,7 +1047,7 @@ func (a *Autoupdater) ChangeBaseBranch(
 	oldBaseBranch, newBaseBranch *BaseBranch,
 	prNumber int,
 ) error {
-	pr, err := a.Dequeue(ctx, oldBaseBranch, prNumber)
+	pr, err := a.Dequeue(ctx, oldBaseBranch, prNumber, true)
 	if err != nil {
 		return fmt.Errorf("could not remove pr from queue for old base branch: %w", err)
 	}
