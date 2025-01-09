@@ -24,6 +24,13 @@ const DefaultHTTPClientTimeout = time.Minute
 
 const loggerName = "github_client"
 
+const (
+	StatePending = "pending"
+	StateSuccess = "success"
+	StateError   = "error"
+	StateFailure = "failure"
+)
+
 var ErrPullRequestIsClosed = errors.New("pull request is closed")
 
 // New returns a new github api client.
@@ -250,6 +257,17 @@ func (clt *Client) RemoveLabel(ctx context.Context, owner, repo string, pullRequ
 	}
 
 	return nil
+}
+
+// CreateCommitStatus submits a commit status.
+// state must be one of [StatePending], [StateSuccess], [StateError], [StateFailure].
+func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error {
+	_, _, err := clt.restClt.Repositories.CreateStatus(ctx, owner, repo, commit, &github.RepoStatus{
+		State:       &state,
+		Description: &description,
+		Context:     &context,
+	})
+	return clt.wrapRetryableErrors(err)
 }
 
 type PRIterator interface {
