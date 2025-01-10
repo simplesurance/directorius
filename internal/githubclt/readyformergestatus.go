@@ -241,11 +241,8 @@ func (clt *Client) reviewAndCIStatus(ctx context.Context, owner, repo string, pr
 							StatusCheckRollup struct {
 								State    githubv4.StatusState
 								Contexts struct {
-									PageInfo struct {
-										EndCursor   string
-										HasNextPage bool
-									}
-									Edges []struct {
+									PageInfo PageInfo
+									Edges    []struct {
 										Node struct {
 											CheckRun      queryCheckStatus   `graphql:"... on CheckRun"`
 											StatusContext queryStatusContext `graphql:"... on StatusContext"`

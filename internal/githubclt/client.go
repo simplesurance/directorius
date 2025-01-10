@@ -412,5 +412,3 @@ func (clt *Client) wrapGraphQLRetryableErrors(err error) error {
 
 	return err
 }
-
-func (clt *Client PRsWithLabel(
