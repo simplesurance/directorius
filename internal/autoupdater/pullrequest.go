@@ -48,7 +48,7 @@ type PullRequest struct {
 
 type ReportedStatusState struct {
 	Commit string
-	State  string
+	State  githubclt.StatusState
 }
 
 func NewPullRequestFromEvent(ev *github.PullRequest) (*PullRequest, error) {

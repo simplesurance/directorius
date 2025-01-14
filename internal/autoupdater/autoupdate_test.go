@@ -56,7 +56,7 @@ func mockCreateHeadCommitStatusPendingPRNr(clt *mocks.MockGithubClient, prNr int
 			gomock.All(),
 			gomock.Eq(repoOwner), gomock.Eq(repo),
 			gomock.Eq(prNr),
-			gomock.Eq(githubclt.StatePending),
+			gomock.Eq(githubclt.StatusStatePending),
 			gomock.Any(),
 			gomock.Eq(githubStatusContext),
 		)
@@ -68,7 +68,7 @@ func mockCreateHeadCommitStatusPending(clt *mocks.MockGithubClient) *gomock.Call
 			gomock.All(),
 			gomock.Eq(repoOwner), gomock.Eq(repo),
 			gomock.Not(nil),
-			gomock.Eq(githubclt.StatePending),
+			gomock.Eq(githubclt.StatusStatePending),
 			gomock.Any(),
 			gomock.Eq(githubStatusContext),
 		)
@@ -80,7 +80,7 @@ func mockCreateCommitStatusSuccessful(clt *mocks.MockGithubClient) *gomock.Call 
 			gomock.All(),
 			gomock.Eq(repoOwner), gomock.Eq(repo),
 			gomock.Eq(headCommitID),
-			gomock.Eq(githubclt.StateSuccess),
+			gomock.Eq(githubclt.StatusStateSuccess),
 			gomock.Any(),
 			gomock.Eq(githubStatusContext),
 		)
@@ -644,7 +644,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 					gomock.Eq(repoOwner),
 					gomock.Eq(repo),
 					gomock.Any(),
-					gomock.Eq(githubclt.StatePending),
+					gomock.Eq(githubclt.StatusStatePending),
 					gomock.Any(),
 					gomock.Eq(githubStatusContext),
 				).AnyTimes()
@@ -655,7 +655,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 					gomock.Eq(repoOwner),
 					gomock.Eq(repo),
 					gomock.Any(),
-					gomock.Eq(githubclt.StateSuccess),
+					gomock.Eq(githubclt.StatusStateSuccess),
 					gomock.Any(),
 					gomock.Eq(githubStatusContext),
 				).AnyTimes()

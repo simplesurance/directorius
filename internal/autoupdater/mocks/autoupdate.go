@@ -58,7 +58,7 @@ func (mr *MockGithubClientMockRecorder) AddLabel(ctx, owner, repo, pullRequestOr
 }
 
 // CreateCommitStatus mocks base method.
-func (m *MockGithubClient) CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error {
+func (m *MockGithubClient) CreateCommitStatus(ctx context.Context, owner, repo, commit string, state githubclt.StatusState, description, context string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateCommitStatus", ctx, owner, repo, commit, state, description, context)
 	ret0, _ := ret[0].(error)
@@ -72,7 +72,7 @@ func (mr *MockGithubClientMockRecorder) CreateCommitStatus(ctx, owner, repo, com
 }
 
 // CreateHeadCommitStatus mocks base method.
-func (m *MockGithubClient) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error {
+func (m *MockGithubClient) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state githubclt.StatusState, description, context string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateHeadCommitStatus", ctx, owner, repo, pullRequestNumber, state, description, context)
 	ret0, _ := ret[0].(error)

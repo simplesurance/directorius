@@ -337,7 +337,7 @@ func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest,
 
 	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", removed)
 	if setPendingStatusState {
-		q.prCreateCommitStatus(context.Background(), removed, "", githubclt.StatePending)
+		q.prCreateCommitStatus(context.Background(), removed, "", githubclt.StatusStatePending)
 	}
 
 	if newFirstElem == nil {
@@ -383,7 +383,7 @@ func (q *queue) Suspend(prNumber int) error {
 		pr.LogFields...,
 	)
 	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", pr)
-	q.prCreateCommitStatus(context.Background(), pr, "", githubclt.StatePending)
+	q.prCreateCommitStatus(context.Background(), pr, "", githubclt.StatusStatePending)
 
 	if newFirstElem == nil {
 		return nil
@@ -648,7 +648,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 	switch status.CIStatus {
 	case githubclt.CIStatusSuccess:
-		q.prCreateCommitStatus(ctx, pr, updateHeadCommit, githubclt.StateSuccess)
+		q.prCreateCommitStatus(ctx, pr, updateHeadCommit, githubclt.StatusStateSuccess)
 		logger.Info("pull request is uptodate, approved and status checks are successful")
 
 	case githubclt.CIStatusPending:
@@ -937,7 +937,7 @@ func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr
 }
 
 func (q *queue) prCreateCommitStatus(
-	ctx context.Context, pr *PullRequest, commit, state string,
+	ctx context.Context, pr *PullRequest, commit string, state githubclt.StatusState,
 ) {
 	err := createCommitStatus(ctx,
 		q.ghClient, q.logger, q.retryer,
@@ -958,7 +958,8 @@ func createCommitStatus(
 	retryer Retryer,
 	repositoryOwner, repository string,
 	pr *PullRequest,
-	commit, state string,
+	commit string,
+	state githubclt.StatusState,
 ) error {
 	var desc string
 
@@ -971,7 +972,7 @@ func createCommitStatus(
 	*/
 
 	lf := logfields.NewWith(pr.LogFields,
-		zap.String("github.status.state", state),
+		zap.String("github.status.state", string(state)),
 		zap.String("github.status.description", desc),
 		zap.String("github.status.context", githubStatusContext),
 	)
@@ -982,7 +983,7 @@ func createCommitStatus(
 	pr.GithubStatusLock.Lock()
 	defer pr.GithubStatusLock.Unlock()
 
-	if state == githubclt.StatePending {
+	if state == githubclt.StatusStatePending {
 		desc = "first in merge queue"
 	}
 

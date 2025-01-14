@@ -22,11 +22,13 @@ const DefaultHTTPClientTimeout = time.Minute
 
 const loggerName = "github_client"
 
+type StatusState string
+
 const (
-	StatePending = "pending"
-	StateSuccess = "success"
-	StateError   = "error"
-	StateFailure = "failure"
+	StatusStatePending StatusState = "pending"
+	StatusStateSuccess StatusState = "success"
+	StatusStateError   StatusState = "error"
+	StatusStateFailure StatusState = "failure"
 )
 
 // New returns a new github api client.
@@ -256,10 +258,13 @@ func (clt *Client) RemoveLabel(ctx context.Context, owner, repo string, pullRequ
 }
 
 // CreateCommitStatus submits a status for a commit.
-// state must be one of [StatePending], [StateSuccess], [StateError], [StateFailure].
-func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error {
+// state must be one of [StatusStatePending], [StatusStateSuccess], [StatusStateError], [StatusStateFailure].
+func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit string, state StatusState, description, context string) error {
+	// The GraphQL API returns states in uppercase, the REST API wants
+	// lowercase states according to the documentation:
+	s := string(state)
 	_, _, err := clt.restClt.Repositories.CreateStatus(ctx, owner, repo, commit, &github.RepoStatus{
-		State:       &state,
+		State:       &s,
 		Description: &description,
 		Context:     &context,
 	})
@@ -267,8 +272,8 @@ func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit, 
 }
 
 // CreateCommitStatus submits a status for the HEAD commit of a pull request branch.
-// state must be one of [StatePending], [StateSuccess], [StateError], [StateFailure].
-func (clt *Client) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error {
+// state must be one of [StatusStatePending], [StatusStateSuccess], [StatusStateError], [StatusStateFailure].
+func (clt *Client) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state StatusState, description, context string) error {
 	pr, _, err := clt.restClt.PullRequests.Get(ctx, owner, repo, pullRequestNumber)
 	if err != nil {
 		return clt.wrapRetryableErrors(err)

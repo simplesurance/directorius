@@ -68,12 +68,12 @@ func (c *DryGithubClient) RemoveLabel(_ context.Context, owner, repo string, pul
 	return nil
 }
 
-func (c *DryGithubClient) CreateCommitStatus(_ context.Context, owner, repo, commit, state, description, context string) error {
+func (c *DryGithubClient) CreateCommitStatus(_ context.Context, owner, repo, commit string, state githubclt.StatusState, description, context string) error {
 	c.logger.Info("simulated creating of github commit status, status has not been created on github",
 		logfields.RepositoryOwner(owner),
 		logfields.Repository(repo),
 		logfields.Commit(commit),
-		zap.String("github.status.state", state),
+		zap.String("github.status.state", string(state)),
 		zap.String("github.status.description", description),
 		zap.String("github.status.context", context),
 	)
@@ -81,12 +81,12 @@ func (c *DryGithubClient) CreateCommitStatus(_ context.Context, owner, repo, com
 	return nil
 }
 
-func (c *DryGithubClient) CreateHeadCommitStatus(_ context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error {
+func (c *DryGithubClient) CreateHeadCommitStatus(_ context.Context, owner, repo string, pullRequestNumber int, state githubclt.StatusState, description, context string) error {
 	c.logger.Info("simulated creating of github commit status, status has not been created on github",
 		logfields.RepositoryOwner(owner),
 		logfields.Repository(repo),
 		logfields.PullRequest(pullRequestNumber),
-		zap.String("github.status.state", state),
+		zap.String("github.status.state", string(state)),
 		zap.String("github.status.description", description),
 		zap.String("github.status.context", context),
 	)

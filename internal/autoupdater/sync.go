@@ -116,7 +116,7 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 				err := createCommitStatus(ctx,
 					a.GitHubClient, logger, a.Retryer,
 					owner, repo, pr, ghPR.HeadCommit,
-					githubclt.StatePending,
+					githubclt.StatusStatePending,
 				)
 				if err != nil {
 					logger.Warn("setting github status state failed", zap.Error(err))
@@ -178,7 +178,7 @@ func (a *Autoupdater) evaluateActions(pr *githubclt.PR) []syncAction {
 	}
 
 	for _, status := range pr.Statuses {
-		if status.Context == githubStatusContext && status.State != githubclt.StatePending {
+		if status.Context == githubStatusContext && status.State != githubclt.StatusStatePending {
 			result = append(result, resetStatusState)
 		}
 	}

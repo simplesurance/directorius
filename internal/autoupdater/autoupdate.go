@@ -26,8 +26,8 @@ const defPeriodicTriggerInterval = 30 * time.Minute
 // autoupdater implementation.
 type GithubClient interface {
 	AddLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
-	CreateCommitStatus(ctx context.Context, owner, repo, commit, state, description, context string) error
-	CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state, description, context string) error
+	CreateCommitStatus(ctx context.Context, owner, repo, commit string, state githubclt.StatusState, description, context string) error
+	CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state githubclt.StatusState, description, context string) error
 	CreateIssueComment(ctx context.Context, owner, repo string, issueOrPRNr int, comment string) error
 	ListPRs(ctx context.Context, owner, repo string) iter.Seq2[*githubclt.PR, error]
 	ReadyForMerge(ctx context.Context, owner, repo string, prNumber int) (*githubclt.ReadyForMergeStatus, error)
