@@ -68,13 +68,14 @@ type listPRsQuery struct {
 	} `graphql:"search(query:$query, type:ISSUE, first:100, after:$pullRequestCursor)"`
 }
 
-// ListPRs returns an iterator over all open pull requests of the repository.
+// ListPRs returns an iterator over all open non-draft pull requests of the
+// repository.
 // If an error happens when querying the GitHub GraphQL API, it is passed as
 // second argument to the iterator.
 func (clt *Client) ListPRs(ctx context.Context, owner, repo string) iter.Seq2[*PR, error] {
 	vars := map[string]any{
 		"pullRequestCursor": (*githubv4.String)(nil),
-		"query":             githubv4.String(fmt.Sprintf("repo:%s/%s is:pr is:open sort:updated-asc", owner, repo)),
+		"query":             githubv4.String(fmt.Sprintf("repo:%s/%s is:pr is:open draft:false sort:updated-asc", owner, repo)),
 	}
 
 	var prs []*PR
