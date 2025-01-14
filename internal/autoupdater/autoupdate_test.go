@@ -69,7 +69,7 @@ func mockCreateHeadCommitStatusPending(clt *mocks.MockGithubClient) *gomock.Call
 			gomock.Eq(repoOwner), gomock.Eq(repo),
 			gomock.Not(nil),
 			gomock.Eq(githubclt.StatusStatePending),
-			gomock.Any(),
+			gomock.Eq(""),
 			gomock.Eq(githubStatusContext),
 		)
 }
@@ -81,7 +81,7 @@ func mockCreateCommitStatusSuccessful(clt *mocks.MockGithubClient) *gomock.Call 
 			gomock.Eq(repoOwner), gomock.Eq(repo),
 			gomock.Eq(headCommitID),
 			gomock.Eq(githubclt.StatusStateSuccess),
-			gomock.Any(),
+			gomock.Eq("#1 in queue"),
 			gomock.Eq(githubStatusContext),
 		)
 }
