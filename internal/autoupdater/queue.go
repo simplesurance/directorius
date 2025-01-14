@@ -983,8 +983,8 @@ func createCommitStatus(
 	pr.GithubStatusLock.Lock()
 	defer pr.GithubStatusLock.Unlock()
 
-	if state == githubclt.StatusStatePending {
-		desc = "first in merge queue"
+	if state == githubclt.StatusStateSuccess {
+		desc = "#1 in queue"
 	}
 
 	if pr.GithubStatusLastSetState.Commit == commit && pr.GithubStatusLastSetState.State == state {
