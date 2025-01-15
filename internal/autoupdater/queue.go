@@ -16,6 +16,7 @@ import (
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goorderr"
 	"github.com/simplesurance/directorius/internal/logfields"
+	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
 
 	"go.uber.org/zap"
@@ -59,7 +60,7 @@ type queue struct {
 
 	logger   *zap.Logger
 	ghClient GithubClient
-	retryer  Retryer
+	retryer  *retry.Retryer
 	ci       *CI
 	metrics  *queueMetrics
 
@@ -89,7 +90,7 @@ type queue struct {
 	paused atomic.Bool
 }
 
-func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retryer Retryer, ci *CI, headLabel string) *queue {
+func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retryer *retry.Retryer, ci *CI, headLabel string) *queue {
 	q := queue{
 		baseBranch:               *base,
 		active:                   orderedmap.New[int, *PullRequest](orderBefore),
@@ -927,7 +928,7 @@ func createCommitStatus(
 	ctx context.Context,
 	clt GithubClient,
 	logger *zap.Logger,
-	retryer Retryer,
+	retryer *retry.Retryer,
 	repositoryOwner, repository string,
 	pr *PullRequest,
 	commit string,

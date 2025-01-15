@@ -35,11 +35,6 @@ type GithubClient interface {
 	UpdateBranch(ctx context.Context, owner, repo string, pullRequestNumber int) (*githubclt.UpdateBranchResult, error)
 }
 
-// Retryer defines methods for running GithubClient operations repeatedly if they fail with a temporary error.
-type Retryer interface {
-	Run(context.Context, func(context.Context) error, []zap.Field) error
-}
-
 // Autoupdater implements processing webhook events, querying the GitHub API
 // and enqueuing/dequeuing/triggering updating pull requests with the
 // base-branch.

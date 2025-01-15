@@ -6,6 +6,7 @@ import (
 
 	"github.com/simplesurance/directorius/internal/jenkins"
 	github_prov "github.com/simplesurance/directorius/internal/provider/github"
+	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
 
 	"go.uber.org/zap"
@@ -19,7 +20,7 @@ type Config struct {
 	GitHubClient          GithubClient
 	CI                    *CI
 	EventChan             <-chan *github_prov.Event
-	Retryer               Retryer
+	Retryer               *retry.Retryer
 	MonitoredRepositories map[Repository]struct{}
 	TriggerOnAutomerge    bool
 	TriggerLabels         set.Set[string]
@@ -39,7 +40,7 @@ type CI struct {
 	Client CIClient
 	Jobs   []*jenkins.JobTemplate
 
-	retryer Retryer
+	retryer *retry.Retryer
 	logger  *zap.Logger
 }
 

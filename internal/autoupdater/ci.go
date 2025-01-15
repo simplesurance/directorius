@@ -9,13 +9,14 @@ import (
 
 	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/logfields"
+	"github.com/simplesurance/directorius/internal/retry"
 
 	"go.uber.org/zap"
 )
 
 // RunAll starts builds of all [c.Jobs] and retrieves their URLs.
 // [pr.LastStartedCIBuilds] is overwritten with the URLs of all started builds.
-func (c *CI) RunAll(ctx context.Context, retryer Retryer, pr *PullRequest) error {
+func (c *CI) RunAll(ctx context.Context, retryer *retry.Retryer, pr *PullRequest) error {
 	var errs []error
 
 	ch := make(chan *runCiResult, len(c.Jobs))
@@ -48,7 +49,7 @@ type runCiResult struct {
 }
 
 // runCIJobToCh runs [CI.runCIJob] and sends the result to resultCh
-func (c *CI) runCIJobToCh(ctx context.Context, resultCh chan<- *runCiResult, retryer Retryer, pr *PullRequest, jobTempl *jenkins.JobTemplate) {
+func (c *CI) runCIJobToCh(ctx context.Context, resultCh chan<- *runCiResult, retryer *retry.Retryer, pr *PullRequest, jobTempl *jenkins.JobTemplate) {
 	build, err := c.runCIJob(ctx, retryer, pr, jobTempl)
 	if err != nil {
 		err = fmt.Errorf("%s: %w", jobTempl.RelURL, err)
@@ -60,7 +61,7 @@ func (c *CI) runCIJobToCh(ctx context.Context, resultCh chan<- *runCiResult, ret
 	}
 }
 
-func (c *CI) runCIJob(ctx context.Context, retryer Retryer, pr *PullRequest, jobTempl *jenkins.JobTemplate) (*jenkins.Build, error) {
+func (c *CI) runCIJob(ctx context.Context, retryer *retry.Retryer, pr *PullRequest, jobTempl *jenkins.JobTemplate) (*jenkins.Build, error) {
 	var queuedBuildItemID int64
 	var build *jenkins.Build
 
