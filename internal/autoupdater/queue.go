@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/simplesurance/directorius/internal/autoupdater/orderedmap"
-	"github.com/simplesurance/directorius/internal/autoupdater/routines"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goorderr"
 	"github.com/simplesurance/directorius/internal/logfields"
 	"github.com/simplesurance/directorius/internal/retry"
+	"github.com/simplesurance/directorius/internal/routines"
 	"github.com/simplesurance/directorius/internal/set"
 
 	"go.uber.org/zap"

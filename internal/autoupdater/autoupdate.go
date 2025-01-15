@@ -78,6 +78,7 @@ type PRPriorityUpdates struct {
 	BranchID BranchID
 	Updates  []*PRPriorityUpdate
 }
+
 type PRPriorityUpdate struct {
 	PRNumber int
 	Priority int32
