@@ -18,7 +18,7 @@
       {{ end }}
       {{ range $queue := .Queues }}
       <section>
-        <h3>Repository {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h3>
+        <h3>Repository: {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h3>
         <form action="{{ $data.SuspendResumePostURL }}" method="post">
           <input type="hidden" name="repository_owner" value="{{ $queue.RepositoryOwner }}"/>
           <input type="hidden" name="repository" value="{{ $queue.Repository }}"/>
