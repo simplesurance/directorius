@@ -358,7 +358,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"pull request enqueued for updates",
-			logFieldReason("auto_merge_enabled"),
+			logfields.Reason("auto_merge_enabled"),
 		)
 
 	case "labeled":
@@ -417,7 +417,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"pull request enqueued for updates",
-			logFieldReason("labeled"),
+			logfields.Reason("labeled"),
 		)
 
 	case "auto_merge_disabled":
@@ -467,9 +467,9 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		var reason zap.Field
 		if action == "closed" {
-			reason = logReasonPRClosed
+			reason = logfields.ReasonPRClosed
 		} else {
-			reason = logFieldReason(action)
+			reason = logfields.Reason(action)
 		}
 
 		logger.Info("pull request dequeued for updates", reason)
@@ -519,7 +519,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"pull request dequeued for updates",
-			logFieldReason("unlabeled"),
+			logfields.Reason("unlabeled"),
 		)
 
 	case "synchronize":
@@ -537,7 +537,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err == nil {
 			logger.Info(
 				"update for pull request triggered",
-				logFieldReason("branch_changed"),
+				logfields.Reason("branch_changed"),
 			)
 
 			// Resume not necessary, PR is already in the active
@@ -563,7 +563,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"updates resumed, pr branch changed",
-			logFieldReason("branch_changed"),
+			logfields.Reason("branch_changed"),
 		)
 
 		return
@@ -607,7 +607,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 
 		logger.Info(
 			"pr was moved to another base-branch queue",
-			logFieldReason("base_branch_changed"),
+			logfields.Reason("base_branch_changed"),
 			zap.String("git.old_base_branch", oldBaseBranch.Branch),
 			logfields.BaseBranch(bb.Branch),
 		)
@@ -721,7 +721,7 @@ func (a *Autoupdater) processPullRequestReviewEvent(ctx context.Context, logger 
 
 		logger.Info(
 			"update for pull request triggered",
-			logFieldReason("pr_review_changes_requested"),
+			logfields.Reason("pr_review_changes_requested"),
 		)
 
 		return
@@ -816,7 +816,7 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 
 			logger.With(pr.LogFields...).Info(
 				"update triggered, negative check run conclusion received",
-				logFieldReason("check_run_result_negative"),
+				logfields.Reason("check_run_result_negative"),
 			)
 		}
 
@@ -872,7 +872,7 @@ func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger
 
 			logger.With(pr.LogFields...).Info(
 				"update triggered, negative status check event received",
-				logFieldReason("status_check_negative"),
+				logfields.Reason("status_check_negative"),
 			)
 		}
 

@@ -2,6 +2,8 @@ package logfields
 
 import "go.uber.org/zap"
 
+var ReasonPRClosed = Reason("pull_request_closed")
+
 func PullRequest(val int) zap.Field {
 	return zap.Int("github.pull_request", val)
 }

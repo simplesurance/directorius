@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/simplesurance/directorius/internal/autoupdater/orderedmap"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/goorderr"
 	"github.com/simplesurance/directorius/internal/logfields"
+	"github.com/simplesurance/directorius/internal/orderedmap"
 	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/routines"
 	"github.com/simplesurance/directorius/internal/set"
@@ -508,7 +508,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 	logger := q.logger.With(loggingFields...)
 
 	if q.IsPaused() {
-		logger.Debug("skipping update", logFieldReason("mergequeue_paused"))
+		logger.Debug("skipping update", logfields.Reason("mergequeue_paused"))
 		return
 	}
 
@@ -553,7 +553,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 		logger.Info(
 			"updates suspended, pr is not approved",
-			logFieldReason("pr_not_approved"),
+			logfields.Reason("pr_not_approved"),
 			zap.Error(err),
 		)
 
@@ -591,7 +591,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 		logger.Info(
 			"updates suspended, pull request is stale",
-			logFieldReason("stale"),
+			logfields.Reason("stale"),
 			zap.Time("last_pr_status_change", pr.GetStateUnchangedSince()),
 			zap.Duration("stale_timeout", q.staleTimeout),
 		)
@@ -671,7 +671,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 		logger.Info(
 			"updates suspended, status check is negative",
-			logFieldReason("status_check_negative"),
+			logfields.Reason("status_check_negative"),
 			zap.Error(err),
 		)
 
@@ -691,7 +691,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 
 		logger.Info(
 			"updates suspended, status check rollup value invalid",
-			logFieldReason("status_check_rollup_state_invalid"),
+			logfields.Reason("status_check_rollup_state_invalid"),
 			zap.Error(err),
 		)
 	}
@@ -750,7 +750,7 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 
 			logger.Info(
 				"pull request dequeued for updates",
-				logReasonPRClosed,
+				logfields.ReasonPRClosed,
 			)
 
 			return false, "", updateBranchErr
@@ -777,7 +777,7 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 
 		logger.Info(
 			"updates suspended, updating pr branch with base branch failed",
-			logFieldReason("update_with_branch_failed"),
+			logfields.Reason("update_with_branch_failed"),
 			zap.Error(updateBranchErr),
 		)
 
@@ -900,7 +900,7 @@ func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr
 			append([]zapcore.Field{
 				zap.Error(err),
 				zap.String("github_label", q.headLabel),
-				logFieldReason(logReason),
+				logfields.Reason(logReason),
 			}, pr.LogFields...)...)
 	}
 	q.logger.Info("queue head label was removed from pr",
