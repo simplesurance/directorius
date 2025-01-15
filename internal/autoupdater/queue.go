@@ -23,10 +23,10 @@ import (
 )
 
 const (
-	// DefStaleTimeout is the default stale timeout.
+	// defStaleTimeout is the default stale timeout.
 	// A pull request is considered as stale, when it is the first element in the
 	// queue and it's state has not changed for this duration.
-	DefStaleTimeout = 3 * time.Hour
+	defStaleTimeout = 3 * time.Hour
 
 	// operationTimeout for how long individual GitHub and CI operations
 	// are retried when an error occurs
@@ -104,7 +104,7 @@ func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retry
 		ghClient:                 ghClient,
 		retryer:                  retryer,
 		actionPool:               routines.NewPool(1),
-		staleTimeout:             DefStaleTimeout,
+		staleTimeout:             defStaleTimeout,
 		updateBranchPollInterval: updateBranchPollInterval,
 		headLabel:                headLabel,
 		ci:                       ci,
