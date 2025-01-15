@@ -42,40 +42,36 @@ const updateBranchPollInterval = 2 * time.Second
 
 const githubStatusContext = "directorius"
 
-// queue implements a queue for automatically updating pull request branches
-// with their base branch.
-// Enqueued pull requests can either be in active or suspended state.
-// Suspended pull requests are not updated.
-// Active pull requests are stored in a FIFO-queue. The first pull request in
-// the queue is kept uptodate with it's base branch.
-//
-// When the first element in the active queue changes, the q.updatePR()
-// operation runs for the pull request.
-// The update operation on the first active PR can also be triggered via
-// queue.ScheduleUpdateFirstPR().
+// queue implements a merge-queue for a specific git base branch.
+// Enqueued pull requests can either be in active or suspended state. Active
+// pull requests are stored in an ordered map. The first pull request in the
+// active queue is processed by [queue.updatePR].
 type queue struct {
 	baseBranch BaseBranch
 
-	// active contains pull requests enqueued for being kept uptodate
+	// active contains pull requests that are evaluated for satisfying the
+	// requirements and are being processed in order
 	active *orderedmap.Map[int, *PullRequest]
-	// suspended contains pull requests that are not kept uptodate
+	// suspended contains pull requests that aren't satisfying the
+	// requirements for being merged
 	suspended map[int]*PullRequest
 	lock      sync.Mutex
 
-	logger *zap.Logger
-
+	logger   *zap.Logger
 	ghClient GithubClient
 	retryer  Retryer
+	ci       *CI
+	metrics  *queueMetrics
 
 	// actionPool is a go-routine pool that runs operations on active pull
-	// requests asynchronously. The pool only contains 1 Go-Routine, to
-	// ensure updates are run synchronously.
+	// requests. The pool only contains 1 Go-Routine, to serialize
+	// operations.
 	actionPool *routines.Pool
-	// executing contains a pointer to a runningTask struct describing the current or
-	// last running pull request for that an action was run.
-	// It's cancelFunc field is used is used to cancel actions for a
-	// pull request when it is suspended while an update operation for it
-	// is executed.
+	// executing contains a pointer to a runningTask struct describing the
+	// current or last running pull request for that an action was run.
+	// It's cancelFunc field is used is used to cancel actions for a pull
+	// request when it is suspended while an update operation for it is
+	// executed.
 	executing atomic.Value // stored type: *runningTask
 
 	updatePRRuns uint64 // atomic must be accessed via atomic functions
@@ -86,11 +82,9 @@ type queue struct {
 	// branch, after GitHub returned that an update has been scheduled.
 	updateBranchPollInterval time.Duration
 
+	// headLabel is a GitHub label that is applied to the first
+	// pull-request in the active queue
 	headLabel string
-
-	metrics *queueMetrics
-
-	ci *CI
 
 	paused atomic.Bool
 }
