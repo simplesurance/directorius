@@ -98,6 +98,7 @@ func TestActiveQueueOrder(t *testing.T) {
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).AnyTimes()
 	mockSuccessfulGithubUpdateBranchCallAnyPR(ghClient, false).AnyTimes()
+	mockCreateCommitStatusSuccessful(ghClient).AnyTimes()
 
 	// must always stay the first in the queue
 	first, err := NewPullRequest(1, "testbr", "fho", "test pr", "")

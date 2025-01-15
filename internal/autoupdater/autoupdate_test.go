@@ -387,6 +387,7 @@ func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(2)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockCreateHeadCommitStatusPending(ghClient).Times(1)
+	mockCreateCommitStatusSuccessful(ghClient).Times(2)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -501,6 +502,7 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockCreateHeadCommitStatusPending(ghClient).Times(1)
+	mockCreateCommitStatusSuccessful(ghClient).Times(1)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -913,6 +915,7 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockCreateHeadCommitStatusPending(ghClient).Times(1)
+	mockCreateCommitStatusSuccessful(ghClient).Times(1)
 
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -1155,6 +1158,7 @@ func TestInitialSync(t *testing.T) {
 					}
 				}
 			}).Times(1)
+	mockCreateCommitStatusSuccessful(ghClient).Times(2)
 
 	ghClient.
 		EXPECT().
@@ -1319,6 +1323,7 @@ func TestDismissingApprovalSuspendsActivePR(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockCreateHeadCommitStatusPending(ghClient)
+	mockCreateCommitStatusSuccessful(ghClient)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1541,6 +1546,7 @@ func TestPRHeadLabelIsAppliedToNextAfterClose(t *testing.T) {
 	).Times(1)
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr1Number).Times(1)
+	mockCreateCommitStatusSuccessful(ghClient).AnyTimes()
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1565,7 +1571,6 @@ func TestPRHeadLabelIsAppliedToNextAfterClose(t *testing.T) {
 		ghClient, pr1Number,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusSuccess,
 	).MinTimes(1)
-	mockCreateCommitStatusSuccessful(ghClient).Times(1)
 
 	evChan <- &github_prov.Event{Event: newSyncEvent(pr1Number, pr1Branch, baseBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 3)
@@ -1612,6 +1617,7 @@ func TestCIJobsTriggeredOnSync(t *testing.T) {
 		ghClient, prNumber,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).Times(2)
+	mockCreateCommitStatusSuccessful(ghClient).Times(1)
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	CiBuldCallCounter := mockCIBuildWithCallCnt(ciClient)
 	mockGetBuildFromQueueItemID(ciClient).Times(1)
@@ -1705,7 +1711,7 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 			CIStatus:                              githubclt.CIStatusPending,
 			ExpectedCICalls:                       1,
 			ExpectedAddLabelCalls:                 1,
-			ExpectedSetCommitStateSuccessfulCalls: 0,
+			ExpectedSetCommitStateSuccessfulCalls: 1,
 			ExpectedSetCommitStatePendingCalls:    0,
 		},
 		{
@@ -1869,6 +1875,7 @@ func TestCIFailuresFromObsoleteBuildsDoNotSuspendPRs(t *testing.T) {
 	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: ciJobURLRel}}
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
+	mockCreateCommitStatusSuccessful(ghClient).Times(1)
 
 	ciClient.EXPECT().Build(gomock.Any(), gomock.Any()).Times(1)
 	ciClient.EXPECT().GetBuildFromQueueItemID(gomock.Any(), gomock.Any()).Return(jenkins.ParseBuildURL(ciLastRunBuildURL)).Times(1)
@@ -1920,6 +1927,7 @@ func TestPauseResumeQueue(t *testing.T) {
 		ghClient, pr.Number,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).Times(4)
+	mockCreateCommitStatusSuccessful(ghClient).AnyTimes()
 
 	autoupdater := newAutoupdater(
 		ghClient,

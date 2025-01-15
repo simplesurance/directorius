@@ -556,7 +556,7 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
 	// to be able to set individual timeouts for calls via the context,
-	// time.AfterFunc instead of context.WithTimeout is used
+	// use time.AfterFunc instead of context.WithTimeout is used
 	timer := time.AfterFunc(updatePRTimeout, cancelFn)
 
 	defer q.incUpdateRuns()
@@ -595,8 +595,6 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		// error is logged in q.updatePRIfNeeded
 		return
 	}
-
-	timer.Stop()
 
 	if branchChanged {
 		logger.Info("branch updated with changes from base branch",
@@ -646,12 +644,15 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		// TODO: rerun the update loop, instead of continuing with the wrong information!
 	}
 
+	timer.Stop()
+
 	switch status.CIStatus {
 	case githubclt.CIStatusSuccess:
 		q.prCreateCommitStatus(ctx, pr, updateHeadCommit, githubclt.StatusStateSuccess)
 		logger.Info("pull request is uptodate, approved and status checks are successful")
 
 	case githubclt.CIStatusPending:
+		q.prCreateCommitStatus(ctx, pr, updateHeadCommit, githubclt.StatusStateSuccess)
 		q.prAddQueueHeadLabel(ctx, pr)
 
 		logger.Info(
