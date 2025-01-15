@@ -1211,7 +1211,7 @@ func TestFirstPRInQueueIsUpdatedPeriodically(t *testing.T) {
 	triggerLabel := "queue-add"
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
-	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, true).Times(2)
+	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, true).AnyTimes()
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
@@ -1226,7 +1226,7 @@ func TestFirstPRInQueueIsUpdatedPeriodically(t *testing.T) {
 		[]string{triggerLabel},
 	)
 
-	autoupdater.periodicTriggerIntv = 2 * time.Second
+	autoupdater.periodicTriggerIntv = 10 * time.Millisecond
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
 
@@ -1239,9 +1239,14 @@ func TestFirstPRInQueueIsUpdatedPeriodically(t *testing.T) {
 	err = autoupdater.Enqueue(context.Background(), baseBranch, pr)
 	require.NoError(t, err)
 
-	time.Sleep(autoupdater.periodicTriggerIntv + time.Second)
+	queue := autoupdater.getQueue(&baseBranch.BranchID)
+	require.NotNil(t, queue)
 
-	// the mocked GithubUpdateCall asserts that it was called 1x from the period update
+	require.Eventually(t,
+		func() bool { return queue.getUpdateRuns() > 1 },
+		3*time.Second,
+		autoupdater.periodicTriggerIntv,
+	)
 }
 
 func TestReviewApprovedEventResumesSuspendedPR(t *testing.T) {
