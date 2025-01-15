@@ -910,8 +910,6 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 		true,
 		[]string{triggerLabel},
 	)
-	autoupdater.periodicTriggerIntv = time.Second
-
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).Times(1)
 	mockCreateHeadCommitStatusPending(ghClient).Times(1)
@@ -932,12 +930,7 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 	queue := autoupdater.getQueue(&baseBranch.BranchID)
 	require.NotNil(t, queue)
 
-	require.Eventually(
-		t,
-		func() bool { return !queue.getLastRun().IsZero() },
-		condWaitTimeout,
-		condCheckInterval,
-	)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
 
 	assert.Equal(t, 1, queue.activeLen(), "active queue")
 	assert.Equal(t, 0, queue.suspendedLen())
@@ -945,6 +938,9 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 	queue.staleTimeout = time.Hour
 	pr.SetStateUnchangedSince(time.Now().Add(-90 * time.Minute))
 
+	queue.ScheduleUpdate(context.Background(), TaskNone)
+
+	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
 	waitForSuspendQueueLen(t, queue, 1)
 
 	assert.Equal(t, 0, queue.activeLen(), "active queue")
