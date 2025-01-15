@@ -74,7 +74,9 @@ type queue struct {
 	// executed.
 	executing atomic.Value // stored type: *runningTask
 
-	updatePRRuns uint64 // atomic must be accessed via atomic functions
+	// updatePRRuns counts the number of times [queue.updatePRRuns] has
+	// been executed.
+	updatePRRuns atomic.Uint64
 
 	staleTimeout time.Duration
 	// updateBranchPollInterval specifies the minimum pause between
@@ -138,11 +140,11 @@ func (q *queue) setExecuting(v *runningOperation) {
 }
 
 func (q *queue) getUpdateRuns() uint64 {
-	return atomic.LoadUint64(&q.updatePRRuns)
+	return q.updatePRRuns.Load()
 }
 
 func (q *queue) incUpdateRuns() {
-	atomic.AddUint64(&q.updatePRRuns, 1)
+	q.updatePRRuns.Add(1)
 }
 
 // cancelActionForPR cancels a running update operation for the given pull
