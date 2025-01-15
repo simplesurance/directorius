@@ -147,8 +147,7 @@ func (q *queue) cancelActionForPR(prNumber int) {
 	if running := q.getExecuting(); running != nil {
 		if running.pr == prNumber {
 			running.cancelFunc()
-			q.logger.Debug(
-				"cancelled running task for pr",
+			q.logger.Debug("cancelled running task for pr",
 				logfields.PullRequest(prNumber),
 			)
 		}
@@ -1103,6 +1102,7 @@ func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRe
 				zap.Error(err),
 			)
 		}
+		q.setExecuting(nil)
 	})
 
 	q.logger.Debug("checking PR status scheduled", pr.LogFields...)
