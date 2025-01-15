@@ -67,12 +67,10 @@ type queue struct {
 	// requests. The pool only contains 1 Go-Routine, to serialize
 	// operations.
 	actionPool *routines.Pool
-	// executing contains a pointer to a runningTask struct describing the
-	// current or last running pull request for that an action was run.
-	// It's cancelFunc field is used is used to cancel actions for a pull
-	// request when it is suspended while an update operation for it is
-	// executed.
-	executing atomic.Value // stored type: *runningTask
+	// executing contains information about the task that is currently
+	// executed in the [queue.actionPool]
+	// it's cancelFunc is used to cancel running operations.
+	executing atomic.Pointer[runningOperation]
 
 	// updatePRRuns counts the number of times [queue.updatePRRuns] has
 	// been executed.
@@ -127,12 +125,7 @@ type runningOperation struct {
 }
 
 func (q *queue) getExecuting() *runningOperation {
-	v := q.executing.Load()
-	if v == nil {
-		return nil
-	}
-
-	return v.(*runningOperation)
+	return q.executing.Load()
 }
 
 func (q *queue) setExecuting(v *runningOperation) {
