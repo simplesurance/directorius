@@ -22,17 +22,19 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// DefStaleTimeout is the default stale timeout.
-// A pull request is considered as stale, when it is the first element in the
-// queue it's state has not changed for longer then this timeout.
-const DefStaleTimeout = 3 * time.Hour
-
 const (
-	// operationTimeout defines the max duration for which individual
-	// GitHub and CI operation are retried on error
+	// DefStaleTimeout is the default stale timeout.
+	// A pull request is considered as stale, when it is the first element in the
+	// queue and it's state has not changed for this duration.
+	DefStaleTimeout = 3 * time.Hour
+
+	// operationTimeout for how long individual GitHub and CI operations
+	// are retried when an error occurs
 	operationTimeout = 10 * time.Minute
+
 	// updatePRTimeout is the max. duration for which the [q.updatePR]
-	// method runs for a PR. It should be bigger than [operationTimeout].
+	// method runs for a single PR. It should be bigger than
+	// [operationTimeout].
 	updatePRTimeout = operationTimeout * 3
 )
 
