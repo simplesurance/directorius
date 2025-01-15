@@ -76,11 +76,6 @@ type queue struct {
 	// is executed.
 	executing atomic.Value // stored type: *runningTask
 
-	// lastRun contains a time.Time struct holding the timestamp of the
-	// last action() run, when action() has not be run yet it contains the
-	// zero Time
-	lastRun atomic.Value // stored type: time.Time
-
 	updatePRRuns uint64 // atomic must be accessed via atomic functions
 
 	staleTimeout time.Duration
@@ -113,8 +108,6 @@ func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retry
 		ci:                       ci,
 	}
 
-	q.setLastRun(time.Time{})
-
 	if qm, err := newQueueMetrics(base.BranchID); err == nil {
 		q.metrics = qm
 	} else {
@@ -146,14 +139,6 @@ func (q *queue) getExecuting() *runningOperation {
 
 func (q *queue) setExecuting(v *runningOperation) {
 	q.executing.Store(v)
-}
-
-func (q *queue) setLastRun(t time.Time) {
-	q.lastRun.Store(t)
-}
-
-func (q *queue) getLastRun() time.Time {
-	return q.lastRun.Load().(time.Time)
 }
 
 func (q *queue) getUpdateRuns() uint64 {
@@ -535,10 +520,6 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 		logger.Debug("skipping update", logFieldReason("mergequeue_paused"))
 		return
 	}
-
-	// q.setLastRun() is wrapped in a func to evaluate time.Now() on
-	// function exit instead of start
-	defer func() { q.setLastRun(time.Now()) }()
 
 	pr.SetStateUnchangedSinceIfZero(time.Now())
 
