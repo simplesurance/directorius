@@ -58,7 +58,7 @@ func mockCreateHeadCommitStatusPendingPRNr(clt *mocks.MockGithubClient, prNr int
 			gomock.Eq(prNr),
 			gomock.Eq(githubclt.StatusStatePending),
 			gomock.Any(),
-			gomock.Eq(githubStatusContext),
+			gomock.Eq(appName),
 		)
 }
 
@@ -70,7 +70,7 @@ func mockCreateHeadCommitStatusPending(clt *mocks.MockGithubClient) *gomock.Call
 			gomock.Not(nil),
 			gomock.Eq(githubclt.StatusStatePending),
 			gomock.Eq(""),
-			gomock.Eq(githubStatusContext),
+			gomock.Eq(appName),
 		)
 }
 
@@ -82,7 +82,7 @@ func mockCreateCommitStatusSuccessful(clt *mocks.MockGithubClient) *gomock.Call 
 			gomock.Eq(headCommitID),
 			gomock.Eq(githubclt.StatusStateSuccess),
 			gomock.Eq("#1 in queue"),
-			gomock.Eq(githubStatusContext),
+			gomock.Eq(appName),
 		)
 }
 
@@ -121,15 +121,6 @@ func mockFailedGithubUpdateBranchCall(clt *mocks.MockGithubClient, expectedPRNr 
 		EXPECT().
 		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(expectedPRNr)).
 		Return(nil, errors.New("error mocked by mockFailedGithubUpdateBranchCall"))
-}
-
-func mockSuccesssfulCreateIssueCommentCall(clt *mocks.MockGithubClient, expectedPRNr int) *gomock.Call {
-	return clt.
-		EXPECT().
-		CreateIssueComment(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(expectedPRNr), gomock.Any()).
-		DoAndReturn(func(context.Context, string, string, int, string) error {
-			return nil
-		})
 }
 
 type mergeStatusMock struct {
@@ -326,7 +317,6 @@ func TestPushToBaseBranchResumesPRs(t *testing.T) {
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
 	).AnyTimes()
 	mockFailedGithubUpdateBranchCall(ghClient, prNumber)
-	mockSuccesssfulCreateIssueCommentCall(ghClient, prNumber)
 
 	mockCreateHeadCommitStatusPending(ghClient).Times(1)
 
@@ -648,7 +638,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 					gomock.Any(),
 					gomock.Eq(githubclt.StatusStatePending),
 					gomock.Any(),
-					gomock.Eq(githubStatusContext),
+					gomock.Eq(appName),
 				).AnyTimes()
 			ghClient.
 				EXPECT().
@@ -659,7 +649,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 					gomock.Any(),
 					gomock.Eq(githubclt.StatusStateSuccess),
 					gomock.Any(),
-					gomock.Eq(githubStatusContext),
+					gomock.Eq(appName),
 				).AnyTimes()
 
 			autoupdater := newAutoupdater(
@@ -825,7 +815,7 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 					gomock.Any(),
 					gomock.Any(),
 					gomock.Any(),
-					gomock.Eq(githubStatusContext),
+					gomock.Eq(appName),
 				).AnyTimes()
 
 			autoupdater := newAutoupdater(
@@ -1154,6 +1144,7 @@ func TestInitialSync(t *testing.T) {
 					}
 				}
 			}).Times(1)
+	// 2 because we have 2 base branches to which PRs are added and become the first one
 	mockCreateCommitStatusSuccessful(ghClient).Times(2)
 
 	ghClient.
@@ -1186,11 +1177,14 @@ func TestInitialSync(t *testing.T) {
 	assert.Nil(t, q.active.Get(3), "pr3 was added to the queue but should not")
 	q.lock.Unlock()
 
+	waitForQueueUpdateRunsGreaterThan(t, q, 0)
+
 	q = autoupdater.getQueue(&BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "p2"})
 	require.NotNil(t, q)
 	q.lock.Lock()
 	assert.NotNil(t, q.active.Get(4), "pr4 was not added to the queue")
 	q.lock.Unlock()
+	waitForQueueUpdateRunsGreaterThan(t, q, 0)
 }
 
 func TestFirstPRInQueueIsUpdatedPeriodically(t *testing.T) {

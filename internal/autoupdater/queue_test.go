@@ -72,7 +72,7 @@ func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
 
 	pr, err := NewPullRequest(1, "pr_branch", "", "", "")
 	require.NoError(t, err)
-	changed, headCommit, err := q.updatePRWithBase(context.Background(), pr, zap.L(), nil)
+	changed, headCommit, err := q.updatePRWithBase(context.Background(), pr)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, headCommitID, headCommit)

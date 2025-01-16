@@ -151,7 +151,7 @@ type UpdateBranchResult struct {
 // If the PR was updated while the method was executed, a
 // goorderr.RetryableError is returned and the operation can be retried.
 // If the branch can not be updated automatically because of a merge conflict,
-// an error is returned.
+// an [ErrMergeConflict] is returned
 func (clt *Client) UpdateBranch(ctx context.Context, owner, repo string, pullRequestNumber int) (*UpdateBranchResult, error) {
 	// 1. Get Commit of PR
 	// 2. Check if it is up-to-date
@@ -193,7 +193,7 @@ func (clt *Client) UpdateBranch(ctx context.Context, owner, repo string, pullReq
 		if errors.As(err, &respErr) {
 			if respErr.Response.StatusCode == http.StatusUnprocessableEntity {
 				if strings.Contains(respErr.Message, "merge conflict") {
-					return nil, fmt.Errorf("merge conflict: %w", respErr)
+					return nil, NewErrMergeConflict(err)
 				}
 
 				if strings.Contains(respErr.Message, "expected head sha didn’t match current head ref") {
