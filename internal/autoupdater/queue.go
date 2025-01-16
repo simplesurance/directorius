@@ -33,10 +33,10 @@ const (
 	// are retried when an error occurs
 	operationTimeout = 10 * time.Minute
 
-	// updatePRTimeout is the max. duration for which the [q.updatePR]
-	// method runs for a single PR. It should be bigger than
-	// [operationTimeout].
-	updatePRTimeout = operationTimeout * 3
+	// processPRTimeout is the max. duration for which the
+	// [q.processPRTimeout] method runs for a single PR. It should be
+	// bigger than [operationTimeout].
+	processPRTimeout = operationTimeout * 3
 )
 
 const updateBranchPollInterval = 2 * time.Second
@@ -46,7 +46,7 @@ const githubStatusContext = "directorius"
 // queue implements a merge-queue for a specific git base branch.
 // Enqueued pull requests can either be in active or suspended state. Active
 // pull requests are stored in an ordered map. The first pull request in the
-// active queue is processed by [queue.updatePR].
+// active queue is processed by [queue.processPR].
 type queue struct {
 	baseBranch BaseBranch
 
@@ -73,9 +73,9 @@ type queue struct {
 	// it's cancelFunc is used to cancel running operations.
 	executing atomic.Pointer[runningOperation]
 
-	// updatePRRuns counts the number of times [queue.updatePRRuns] has
+	// processPRruns counts the number of times [queue.processPRruns] has
 	// been executed.
-	updatePRRuns atomic.Uint64
+	processPRruns atomic.Uint64
 
 	staleTimeout time.Duration
 	// updateBranchPollInterval specifies the minimum pause between
@@ -133,12 +133,12 @@ func (q *queue) setExecuting(v *runningOperation) {
 	q.executing.Store(v)
 }
 
-func (q *queue) getUpdateRuns() uint64 {
-	return q.updatePRRuns.Load()
+func (q *queue) getProcessPRRuns() uint64 {
+	return q.processPRruns.Load()
 }
 
-func (q *queue) incUpdateRuns() {
-	q.updatePRRuns.Add(1)
+func (q *queue) incProcessPRRuns() {
+	q.processPRruns.Add(1)
 }
 
 // cancelActionForPR cancels a running update operation for the given pull
@@ -453,7 +453,7 @@ func (q *queue) scheduleUpdate(ctx context.Context, pr *PullRequest, task Task) 
 		defer cancelFunc()
 
 		q.setExecuting(&runningOperation{pr: pr.Number, cancelFunc: cancelFunc})
-		q.updatePR(ctx, pr, task)
+		q.processPR(ctx, pr, task)
 		q.setExecuting(nil)
 	})
 
@@ -487,23 +487,26 @@ func (q *queue) isPRStale(pr *PullRequest) bool {
 	return lastStatusChange.Add(q.staleTimeout).Before(time.Now())
 }
 
-// updatePR updates runs the update operation for the pull request.
-// If the ctx is canceled or the pr is not the first one in the active queue
-// nothing is done.
+// processPR analyzes the state of a pull request, updates it with is base
+// branch and triggers CI jobs.
+// If the ctx is canceled or the pull request is not the first one in the
+// active queue nothing is done.
 // If the base-branch contains changes that are not in the pull request branch,
 // updating it, by merging the base-branch into the PR branch, is schedule via
-// the GitHub API.
-// If updating is not possible because a merge-conflict exist or another error
-// happened, a comment is posted to the pull request and updating the
-// pull request is suspended.
-// If it is already uptodate, it's GitHub check and status state is retrieved.
-// If it is in a failed or error state, the pull request is suspended.
-// If the status is successful, nothing is done and the pull request is kept as
-// first element in the active queue.
+// the GitHub API. If updating is not possible because a merge-conflict exist
+// or another error happened, a comment is posted to the pull request and
+// updating the pull request is suspended.
+// If it is already uptodate, it's GitHub check, status and review state is
+// retrieved. If it is in a failed CI status and the state is for the last
+// triggered build of the CI Job or error state or the pull request is not
+// approved, the pull request is suspended.
+// If the status is pending a successful github status from directorius is
+// submitted for the HEAD commit and the queue head label is added to the pull
+// request.
 // If the pull request was not updated, it's GitHub check status did not change
 // and it is the first element in the queue longer then q.staleTimeout it is
 // suspended.
-func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
+func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 	loggingFields := pr.LogFields
 	logger := q.logger.With(loggingFields...)
 
@@ -529,9 +532,9 @@ func (q *queue) updatePR(ctx context.Context, pr *PullRequest, task Task) {
 	defer cancelFn()
 	// to be able to set individual timeouts for calls via the context,
 	// use time.AfterFunc instead of context.WithTimeout is used
-	timer := time.AfterFunc(updatePRTimeout, cancelFn)
+	timer := time.AfterFunc(processPRTimeout, cancelFn)
 
-	defer q.incUpdateRuns()
+	defer q.incProcessPRRuns()
 
 	status, err := q.prReadyForMergeStatus(ctx, pr)
 	if err != nil {

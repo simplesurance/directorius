@@ -135,8 +135,7 @@ func (p *PullRequest) SetStateUnchangedSinceIfZero(t time.Time) {
 // newer build id.
 //
 // This function is not concurrency-safe, reading and writing to
-// [pr.CITriggerStatus.BuildURLs] must be serialized by for example only
-// running both operations as part of [queue.updatePR].
+// [pr.CITriggerStatus.BuildURLs] must be serialized.
 func (p *PullRequest) FailedCIStatusIsForNewestBuild(logger *zap.Logger, statuses []*githubclt.CIJobStatus) (bool, error) {
 	if len(statuses) == 0 {
 		return false, errors.New("github status ci job list is empty")

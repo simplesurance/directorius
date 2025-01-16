@@ -198,10 +198,10 @@ func waitForQueueUpdateRunsGreaterThan(t *testing.T, q *queue, v uint64) {
 
 	require.Eventuallyf(
 		t,
-		func() bool { return q.getUpdateRuns() > v },
+		func() bool { return q.getProcessPRRuns() > v },
 		condWaitTimeout,
 		condCheckInterval,
-		"queue update runs count is %d, expected > %d", q.getUpdateRuns(), v,
+		"queue update runs count is %d, expected > %d", q.getProcessPRRuns(), v,
 	)
 }
 
@@ -1239,7 +1239,7 @@ func TestFirstPRInQueueIsUpdatedPeriodically(t *testing.T) {
 	require.NotNil(t, queue)
 
 	require.Eventually(t,
-		func() bool { return queue.getUpdateRuns() > 1 },
+		func() bool { return queue.getProcessPRRuns() > 1 },
 		3*time.Second,
 		autoupdater.periodicTriggerIntv,
 	)

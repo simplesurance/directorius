@@ -43,7 +43,7 @@ func TestUpdatePR_DoesNotCallBaseBranchUpdateIfPRIsNotApproved(t *testing.T) {
 	).AnyTimes()
 	ghClient.EXPECT().UpdateBranch(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
-	q.updatePR(context.Background(), pr, TaskNone)
+	q.processPR(context.Background(), pr, TaskNone)
 }
 
 func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
