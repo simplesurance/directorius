@@ -2,6 +2,7 @@ package githubclt
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 
@@ -58,4 +59,22 @@ func (clt *Client) wrapGraphQLRetryableErrors(err error) error {
 	}
 
 	return err
+}
+
+type ErrMergeConflict struct {
+	Err error
+}
+
+func NewErrMergeConflict(cause error) error {
+	return &ErrMergeConflict{
+		Err: cause,
+	}
+}
+
+func (e *ErrMergeConflict) Error() string {
+	return fmt.Sprintf("merge conflict: %s", e.Err.Error())
+}
+
+func (e *ErrMergeConflict) Unwrap() error {
+	return e.Err
 }

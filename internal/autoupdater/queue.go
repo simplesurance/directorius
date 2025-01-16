@@ -33,15 +33,17 @@ const (
 	// are retried when an error occurs
 	operationTimeout = 10 * time.Minute
 
+	postCommentTimeout = time.Minute
+
 	// processPRTimeout is the max. duration for which the
-	// [q.processPRTimeout] method runs for a single PR. It should be
+	// [queue.processPR] method runs for a single PR. It should be
 	// bigger than [operationTimeout].
 	processPRTimeout = operationTimeout * 3
 )
 
 const updateBranchPollInterval = 2 * time.Second
 
-const githubStatusContext = "directorius"
+const appName = "directorius"
 
 // queue implements a merge-queue for a specific git base branch.
 // Enqueued pull requests can either be in active or suspended state. Active
@@ -336,6 +338,7 @@ func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest,
 // If an update operation is currently running for it, it is canceled.
 // If is not active or not queued ErrNotFound is returned.
 func (q *queue) Suspend(prNumber int) error {
+	// FIXME: pass ctx to function
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
@@ -518,190 +521,105 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 	pr.SetStateUnchangedSinceIfZero(time.Now())
 
 	if err := ctx.Err(); err != nil {
-		logger.Debug("skipping update", zap.Error(err))
-
+		logger.Debug("skipping processing pr", zap.Error(err))
 		return
 	}
 
 	if !q.isFirstActive(pr) {
-		logger.Debug("skipping update, pull request is not first in queue")
+		logger.Debug("skipping processing pr, pull request is not first in queue")
 		return
 	}
 
-	ctx, cancelFn := context.WithCancel(ctx)
+	ctx, cancelFn := context.WithTimeout(ctx, processPRTimeout)
 	defer cancelFn()
-	// to be able to set individual timeouts for calls via the context,
-	// use time.AfterFunc instead of context.WithTimeout is used
-	timer := time.AfterFunc(processPRTimeout, cancelFn)
 
 	defer q.incProcessPRRuns()
 
-	status, err := q.prReadyForMergeStatus(ctx, pr)
+	actions, err := q.evalPRAction(ctx, logger, pr)
 	if err != nil {
-		logger.Error("checking pr merge status failed",
-			zap.Error(err),
-		)
-		return
-	}
-
-	if status.ReviewDecision != githubclt.ReviewDecisionApproved {
-		if err := q.Suspend(pr.Number); err != nil {
-			logger.Error(
-				"suspending PR because it is not approved, failed",
-				zap.Error(err),
-			)
-
-			return
-		}
-
-		logger.Info(
-			"updates suspended, pr is not approved",
-			logfields.Reason("pr_not_approved"),
+		logger.Error(
+			"evaluating status of first pull request in the queue failed",
 			zap.Error(err),
 		)
 
-		return
-	}
-
-	logger.Debug("pr is approved")
-
-	branchChanged, updateHeadCommit, err := q.updatePRWithBase(ctx, pr, logger, loggingFields)
-	if err != nil {
-		// error is logged in q.updatePRIfNeeded
-		return
-	}
-
-	if branchChanged {
-		logger.Info("branch updated with changes from base branch",
-			logfields.Commit(updateHeadCommit),
-		)
-
-		pr.SetStateUnchangedSinceIfNewer(time.Now())
-		// queue label is not added neither CI jobs are trigger yet,
-		// the update of the branch will cause a PullRequest
-		// synchronize event, that will trigger
-		// another run of this function which will then trigger the CI jobs and add the label.
-		return
-	}
-
-	if q.isPRStale(pr) {
-		if err := q.Suspend(pr.Number); err != nil {
-			logger.Error("suspending PR because it's stale, failed",
-				zap.Error(err),
-			)
+		if errors.Is(err, context.Canceled) {
 			return
 		}
 
-		logger.Info(
-			"updates suspended, pull request is stale",
-			logfields.Reason("stale"),
-			zap.Time("last_pr_status_change", pr.GetStateUnchangedSince()),
-			zap.Duration("stale_timeout", q.staleTimeout),
-		)
+		if err := q.Suspend(pr.Number); err != nil {
+			logger.Error("suspending PR failed", zap.Error(err))
+			return
+		}
 
+		logger.Info("pull request suspended", logfields.Reason("eval_pr_status_failed"))
 		return
 	}
 
-	logger.Debug("pull request is not stale",
-		zap.Time("last_pr_status_change", pr.GetStateUnchangedSince()),
-		zap.Duration("stale_timeout", q.staleTimeout),
+	logger.Debug("evaluated pull request actions",
+		zap.Stringers("actions", actions.Actions),
+		logfields.Reason(actions.Reason),
+		logfields.Commit(actions.HeadCommitID),
 	)
 
-	if status.Commit != updateHeadCommit {
-		logger.Warn("retrieved ready for merge status for a different "+
-			"commit than the current head commit according to "+
-			"the update branch operation, branch might have "+
-			"changed in between or github might have returned "+
-			"outdated information",
-			zap.String("github.ready_for_merge_commit", status.Commit),
-			zap.String("github.update_branch_head_commit", updateHeadCommit),
-		)
-		// TODO: rerun the update loop, instead of continuing with the wrong information!
-	}
-
-	timer.Stop()
-
-	switch status.CIStatus {
-	case githubclt.CIStatusSuccess:
-		q.prCreateCommitStatus(ctx, pr, updateHeadCommit, githubclt.StatusStateSuccess)
-		logger.Info("pull request is uptodate, approved and status checks are successful")
-
-	case githubclt.CIStatusPending:
-		q.prCreateCommitStatus(ctx, pr, updateHeadCommit, githubclt.StatusStateSuccess)
-		q.prAddQueueHeadLabel(ctx, pr)
-
-		logger.Info(
-			"pull request is uptodate, approved and status checks are pending",
-		)
-
-		if task == TaskTriggerCI {
-			err := q.ci.RunAll(ctx, q.retryer, pr)
-			if err != nil {
-				logger.Error("triggering CI jobs failed",
-					zap.Error(err),
-				)
-				return
-			}
-			logger.Info("ci jobs triggered")
+	reason := actions.Reason
+	for _, action := range actions.Actions {
+		switch action {
+		case ActionUpdateStateUnchanged:
 			pr.SetStateUnchangedSinceIfNewer(time.Now())
-		}
 
-	case githubclt.CIStatusFailure:
-		newestBuildFailed, err := pr.FailedCIStatusIsForNewestBuild(logger, status.Statuses)
-		if err != nil {
-			logger.Error("evaluating if ci builds from github status last or newer started ci builds failed",
-				zap.Error(err),
-				zap.Any("github.ci_statuses", status),
+		case ActionSuspend:
+			if err := q.Suspend(pr.Number); err != nil {
+				logger.Error("suspending PR failed", zap.Error(err))
+				continue
+			}
+
+			logger.Info("pull request suspended", logfields.Reason(reason))
+
+		case ActionCreatePullRequestComment:
+			// use a shorter timeout to prevent that this optional operation blocks for long
+			ctx, cancelFunc := context.WithTimeout(ctx, postCommentTimeout)
+			defer cancelFunc()
+			err := q.ghClient.CreateIssueComment(
+				ctx,
+				q.baseBranch.RepositoryOwner,
+				q.baseBranch.Repository,
+				pr.Number,
+				fmt.Sprintf("%s: pull request moved to suspend queue base-branch updates suspended, updating branch failed:\n```%s```",
+					appName, reason),
 			)
+			if err != nil {
+				logger.Error("posting comment to github PR failed", zap.Error(err))
+			}
+
+		case ActionAddFirstInQueueGithubLabel:
+			q.prAddQueueHeadLabel(ctx, pr)
+
+		case ActionCreateSuccessfulGithubStatus:
+			q.prCreateCommitStatus(ctx, pr, headCommitID, githubclt.StatusStateSuccess)
+
+		case ActionWaitForMerge:
+			logger.Info("waiting for github to merge the pull-request", logfields.Reason(reason))
+
+		case ActionTriggerCIJobs:
+			if task == TaskTriggerCI {
+				err := q.ci.RunAll(ctx, q.retryer, pr)
+				if err != nil {
+					logger.Error("triggering CI jobs failed",
+						zap.Error(err),
+					)
+					return
+				}
+				logger.Info("ci jobs triggered", logfields.Reason(reason))
+				pr.SetStateUnchangedSinceIfNewer(time.Now())
+			}
+
+		case ActionNone:
+			logger.Info("evaluated status of first pull request in queue, nothing to do", logfields.Reason(reason))
 		}
-		if err == nil && !newestBuildFailed {
-			logger.Info("status check is negative "+
-				"but none of the affected ci builds are in the list "+
-				"of recently triggered required jobs, pr is not suspended",
-				zap.Any("ci.build.last_triggered", pr.LastStartedCIBuilds),
-				zap.Any("github.ci_statuses", status),
-			)
-			return
-		}
-
-		if err := q.Suspend(pr.Number); err != nil {
-			logger.Error(
-				"suspending PR because it's PR status is negative, failed",
-				zap.Error(err),
-			)
-			return
-		}
-
-		logger.Info(
-			"updates suspended, status check is negative",
-			logfields.Reason("status_check_negative"),
-			zap.Error(err),
-		)
-
-		return
-
-	default:
-		logger.Warn("pull request ci status has unexpected value, suspending autoupdates for PR")
-
-		if err := q.Suspend(pr.Number); err != nil {
-			logger.Error(
-				"suspending PR because it's status check rollup state has an invalid value, failed",
-				zap.Error(err),
-			)
-
-			return
-		}
-
-		logger.Info(
-			"updates suspended, status check rollup value invalid",
-			logfields.Reason("status_check_rollup_state_invalid"),
-			zap.Error(err),
-		)
 	}
 }
 
-// TODO: passing logger and loggingFields as parameters is redundant, only pass one of them
-func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *zap.Logger, loggingFields []zapcore.Field) (changed bool, headCommit string, updateBranchErr error) {
+func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest) (changed bool, headCommit string, updateBranchErr error) {
 	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
 	defer cancelFunc()
 
@@ -733,77 +651,14 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest, logger *z
 		headCommit = result.HeadCommitID
 
 		return nil
-	},
-		append([]zapcore.Field{logfields.Operation("update_branch")}, loggingFields...),
-	)
+	}, logfields.NewWith(pr.LogFields, logfields.Operation("update_branch")))
 
 	if updateBranchErr != nil {
 		if isPRIsClosedErr(updateBranchErr) {
-			logger.Info(
-				"updating branch with base branch failed, pull request is closed, removing PR from queue",
-				zap.Error(updateBranchErr),
-			)
-
-			if _, err := q.Dequeue(pr.Number, true); err != nil {
-				logger.Error("removing pr from queue after failed update failed",
-					zap.Error(err),
-				)
-				return false, "", errors.Join(updateBranchErr, err)
-			}
-
-			logger.Info(
-				"pull request dequeued for updates",
-				logfields.ReasonPRClosed,
-			)
-
-			return false, "", updateBranchErr
+			return false, "", ErrPullRequestIsClosed
 		}
 
-		if errors.Is(updateBranchErr, context.Canceled) {
-			logger.Debug(
-				"updating branch with base branch was cancelled",
-			)
-
-			return false, "", updateBranchErr
-		}
-
-		// use a new context, otherwise it is forwarded for an
-		// action on another branch, and canceling action for
-		// one branch, would cancel multiple others
-		if err := q.Suspend(pr.Number); err != nil {
-			logger.Error(
-				"suspending PR failed, after branch update also failed",
-				zap.Error(err),
-			)
-			return false, "", errors.Join(updateBranchErr, err)
-		}
-
-		logger.Info(
-			"updates suspended, updating pr branch with base branch failed",
-			logfields.Reason("update_with_branch_failed"),
-			zap.Error(updateBranchErr),
-		)
-
-		// the current ctx got canceled in q.Suspend(), use
-		// another context to prevent that posting the comment
-		// gets canceled, use a shorter timeout to prevent that this
-		// operations blocks the queue unnecessary long, use a shorter
-		// timeout to prevent that this operations blocks the queue
-		// unnecessary long
-		ctx, cancelFunc := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancelFunc()
-		err := q.ghClient.CreateIssueComment(
-			ctx,
-			q.baseBranch.RepositoryOwner,
-			q.baseBranch.Repository,
-			pr.Number,
-			fmt.Sprintf("goordinator: automatic base-branch updates suspended, updating branch failed:\n```%s```", updateBranchErr.Error()),
-		)
-		if err != nil {
-			logger.Error("posting comment to github PR failed", zap.Error(err))
-		}
-
-		return false, "", errors.Join(updateBranchErr, err)
+		return false, "", updateBranchErr
 	}
 
 	return changed, headCommit, nil
@@ -950,7 +805,7 @@ func createCommitStatus(
 	lf := logfields.NewWith(pr.LogFields,
 		zap.String("github.status.state", string(state)),
 		zap.String("github.status.description", desc),
-		zap.String("github.status.context", githubStatusContext),
+		zap.String("github.status.context", appName),
 	)
 	if commit != "" {
 		lf = append(lf, logfields.Commit(commit))
@@ -975,12 +830,12 @@ func createCommitStatus(
 		if commit == "" {
 			return clt.CreateHeadCommitStatus(ctx,
 				repositoryOwner, repository, pr.Number,
-				state, desc, githubStatusContext,
+				state, desc, appName,
 			)
 		}
 		return clt.CreateCommitStatus(ctx,
 			repositoryOwner, repository, commit,
-			state, desc, githubStatusContext,
+			state, desc, appName,
 		)
 	}, logfields.NewWith(lf, logfields.Operation("github.create_commit_status")))
 	if err != nil {

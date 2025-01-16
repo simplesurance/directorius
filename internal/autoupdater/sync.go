@@ -178,7 +178,7 @@ func (a *Autoupdater) evaluateActions(pr *githubclt.PR) []syncAction {
 	}
 
 	for _, status := range pr.Statuses {
-		if status.Context == githubStatusContext && status.State != githubclt.StatusStatePending {
+		if status.Context == appName && status.State != githubclt.StatusStatePending {
 			result = append(result, resetStatusState)
 		}
 	}
