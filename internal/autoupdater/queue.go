@@ -337,8 +337,7 @@ func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest,
 // Suspend suspends updates for the pull request with the given number.
 // If an update operation is currently running for it, it is canceled.
 // If is not active or not queued ErrNotFound is returned.
-func (q *queue) Suspend(prNumber int) error {
-	// FIXME: pass ctx to function
+func (q *queue) Suspend(ctx context.Context, prNumber int) error {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
@@ -361,8 +360,8 @@ func (q *queue) Suspend(prNumber int) error {
 	q.logger.Debug("pr moved to suspend queue",
 		pr.LogFields...,
 	)
-	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", pr)
-	q.prCreateCommitStatus(context.Background(), pr, "", githubclt.StatusStatePending)
+	q.prRemoveQueueHeadLabel(ctx, "dequeue", pr)
+	q.prCreateCommitStatus(ctx, pr, "", githubclt.StatusStatePending)
 
 	if newFirstElem == nil {
 		return nil
@@ -374,7 +373,7 @@ func (q *queue) Suspend(prNumber int) error {
 		zap.Int("github.pull_request_new_first", newFirstElem.Number),
 	)
 
-	q.scheduleUpdate(context.Background(), newFirstElem, TaskTriggerCI)
+	q.scheduleUpdate(ctx, newFirstElem, TaskTriggerCI)
 
 	return nil
 }
@@ -546,7 +545,7 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 			return
 		}
 
-		if err := q.Suspend(pr.Number); err != nil {
+		if err := q.Suspend(ctx, pr.Number); err != nil {
 			logger.Error("suspending PR failed", zap.Error(err))
 			return
 		}
@@ -568,7 +567,7 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 			pr.SetStateUnchangedSinceIfNewer(time.Now())
 
 		case ActionSuspend:
-			if err := q.Suspend(pr.Number); err != nil {
+			if err := q.Suspend(ctx, pr.Number); err != nil {
 				logger.Error("suspending PR failed", zap.Error(err))
 				continue
 			}
