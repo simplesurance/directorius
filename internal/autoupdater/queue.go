@@ -597,7 +597,7 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 			q.prAddQueueHeadLabel(ctx, pr)
 
 		case ActionCreateSuccessfulGithubStatus:
-			q.prCreateCommitStatus(ctx, pr, headCommitID, githubclt.StatusStateSuccess)
+			q.prCreateCommitStatus(ctx, pr, actions.HeadCommitID, githubclt.StatusStateSuccess)
 
 		case ActionWaitForMerge:
 			logger.Info("waiting for github to merge the pull-request", logfields.Reason(reason))

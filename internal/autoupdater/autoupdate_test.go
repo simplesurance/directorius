@@ -88,7 +88,7 @@ func mockCreateCommitStatusSuccessful(clt *mocks.MockGithubClient) *gomock.Call 
 		CreateCommitStatus(
 			gomock.All(),
 			gomock.Eq(repoOwner), gomock.Eq(repo),
-			gomock.Eq(headCommitID),
+			gomock.Eq(dryGitHubClientHeadCommitID),
 			gomock.Eq(githubclt.StatusStateSuccess),
 			gomock.Eq("#1 in queue"),
 			gomock.Eq(appName),
@@ -115,14 +115,14 @@ func mockSuccessfulGithubUpdateBranchCall(clt *mocks.MockGithubClient, expectedP
 	return clt.
 		EXPECT().
 		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(expectedPRNr)).
-		Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID, Changed: branchChanged}, nil)
+		Return(&githubclt.UpdateBranchResult{HeadCommitID: dryGitHubClientHeadCommitID, Changed: branchChanged}, nil)
 }
 
 func mockSuccessfulGithubUpdateBranchCallAnyPR(clt *mocks.MockGithubClient, branchChanged bool) *gomock.Call {
 	return clt.
 		EXPECT().
 		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
-		Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID, Changed: branchChanged}, nil)
+		Return(&githubclt.UpdateBranchResult{HeadCommitID: dryGitHubClientHeadCommitID, Changed: branchChanged}, nil)
 }
 
 func mockFailedGithubUpdateBranchCall(clt *mocks.MockGithubClient, expectedPRNr int) *gomock.Call {
@@ -606,7 +606,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 			ghClient.
 				EXPECT().
 				UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
-				Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID}, nil).
+				Return(&githubclt.UpdateBranchResult{HeadCommitID: dryGitHubClientHeadCommitID}, nil).
 				MinTimes(3)
 
 			mergeStatusPr1 := mockReadyForMergeStatus(
@@ -812,7 +812,7 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 			ghClient.
 				EXPECT().
 				UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
-				Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID}, nil).
+				Return(&githubclt.UpdateBranchResult{HeadCommitID: dryGitHubClientHeadCommitID}, nil).
 				AnyTimes()
 
 			ghClient.
@@ -1079,7 +1079,7 @@ func TestInitialSync(t *testing.T) {
 	ghClient.
 		EXPECT().
 		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
-		Return(&githubclt.UpdateBranchResult{HeadCommitID: headCommitID}, nil).
+		Return(&githubclt.UpdateBranchResult{HeadCommitID: dryGitHubClientHeadCommitID}, nil).
 		AnyTimes()
 
 	mockReadyForMergeStatus(
@@ -1494,7 +1494,7 @@ func TestBaseBranchUpdatesBlockUntilFinished(t *testing.T) {
 		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
 		DoAndReturn(func(context.Context, string, string, int) (*githubclt.UpdateBranchResult, error) {
 			atomic.AddInt64(&updateBranchCalls, 1)
-			return &githubclt.UpdateBranchResult{Changed: true, HeadCommitID: headCommitID, Scheduled: scheduledReturnVal.Load()}, nil
+			return &githubclt.UpdateBranchResult{Changed: true, HeadCommitID: dryGitHubClientHeadCommitID, Scheduled: scheduledReturnVal.Load()}, nil
 		}).MinTimes(1)
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
@@ -1613,7 +1613,7 @@ func TestCIJobsTriggeredOnSync(t *testing.T) {
 			updateBranchCalls.Add(1)
 			return &githubclt.UpdateBranchResult{
 				Changed:      updateBranchCalls.Load() == 1,
-				HeadCommitID: headCommitID,
+				HeadCommitID: dryGitHubClientHeadCommitID,
 			}, nil
 		}).Times(2)
 
@@ -1670,7 +1670,7 @@ func TestCIJobsNotTriggeredWhenBranchNeedsUpdate(t *testing.T) {
 			updateBranchCalls.Add(1)
 			return &githubclt.UpdateBranchResult{
 				Changed:      true,
-				HeadCommitID: headCommitID,
+				HeadCommitID: dryGitHubClientHeadCommitID,
 			}, nil
 		}).Times(1)
 
@@ -1753,7 +1753,7 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 				UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
 				DoAndReturn(func(context.Context, string, string, int) (*githubclt.UpdateBranchResult, error) {
 					return &githubclt.UpdateBranchResult{
-						HeadCommitID: headCommitID,
+						HeadCommitID: dryGitHubClientHeadCommitID,
 					}, nil
 				}).Times(1)
 
@@ -1844,7 +1844,7 @@ func TestCIFailuresFromObsoleteBuildsDoNotSuspendPRs(t *testing.T) {
 				return &githubclt.ReadyForMergeStatus{
 					ReviewDecision: githubclt.ReviewDecisionApproved,
 					CIStatus:       githubclt.CIStatusFailure,
-					Commit:         headCommitID,
+					Commit:         dryGitHubClientHeadCommitID,
 					Statuses: []*githubclt.CIJobStatus{{
 						Name:     "unittests",
 						Required: true,
@@ -1856,7 +1856,7 @@ func TestCIFailuresFromObsoleteBuildsDoNotSuspendPRs(t *testing.T) {
 			return &githubclt.ReadyForMergeStatus{
 				ReviewDecision: githubclt.ReviewDecisionApproved,
 				CIStatus:       githubclt.CIStatusPending,
-				Commit:         headCommitID,
+				Commit:         dryGitHubClientHeadCommitID,
 				Statuses: []*githubclt.CIJobStatus{{
 					Name:     "unittests",
 					Required: true,
@@ -1993,7 +1993,7 @@ func TestSuccessfulStatusStateIsOnlySetOnce(t *testing.T) {
 		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
 		DoAndReturn(func(context.Context, string, string, int) (*githubclt.UpdateBranchResult, error) {
 			return &githubclt.UpdateBranchResult{
-				HeadCommitID: headCommitID,
+				HeadCommitID: dryGitHubClientHeadCommitID,
 			}, nil
 		}).Times(2)
 

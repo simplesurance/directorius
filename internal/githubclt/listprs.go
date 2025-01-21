@@ -83,7 +83,6 @@ func (clt *Client) ListPRs(ctx context.Context, owner, repo string) iter.Seq2[*P
 
 	return func(yield func(pr *PR, err error) bool) {
 		for {
-
 			if len(prs) > 0 {
 				if !yield(prs[0], nil) {
 					return

@@ -59,10 +59,10 @@ func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
 		DoAndReturn(func(context.Context, string, string, int) (*githubclt.UpdateBranchResult, error) {
 			if updateBranchCalls == 0 {
 				updateBranchCalls++
-				return &githubclt.UpdateBranchResult{HeadCommitID: headCommitID, Changed: true, Scheduled: true}, nil
+				return &githubclt.UpdateBranchResult{HeadCommitID: dryGitHubClientHeadCommitID, Changed: true, Scheduled: true}, nil
 			}
 			updateBranchCalls++
-			return &githubclt.UpdateBranchResult{HeadCommitID: headCommitID, Changed: false, Scheduled: false}, nil
+			return &githubclt.UpdateBranchResult{HeadCommitID: dryGitHubClientHeadCommitID, Changed: false, Scheduled: false}, nil
 		}).
 		Times(2)
 
@@ -75,7 +75,7 @@ func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
 	changed, headCommit, err := q.updatePRWithBase(context.Background(), pr)
 	require.NoError(t, err)
 	assert.True(t, changed)
-	assert.Equal(t, headCommitID, headCommit)
+	assert.Equal(t, dryGitHubClientHeadCommitID, headCommit)
 	q.Stop()
 }
 
