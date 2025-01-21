@@ -1,6 +1,6 @@
 module github.com/simplesurance/directorius
 
-go 1.23.4
+go 1.23.5
 
 require (
 	github.com/cenkalti/backoff v2.2.1+incompatible
