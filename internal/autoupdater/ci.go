@@ -25,7 +25,7 @@ func (c *CI) RunAll(ctx context.Context, retryer *retry.Retryer, pr *PullRequest
 		go c.runCIJobToCh(ctx, ch, retryer, pr, jobTempl)
 	}
 
-	clear(pr.LastStartedCIBuilds)
+	builds := make(map[string]*jenkins.Build, len(c.Jobs))
 
 	for range len(c.Jobs) {
 		result := <-ch
@@ -33,8 +33,9 @@ func (c *CI) RunAll(ctx context.Context, retryer *retry.Retryer, pr *PullRequest
 			errs = append(errs, result.Err)
 			continue
 		}
-		pr.LastStartedCIBuilds[result.Build.JobName] = result.Build
+		builds[result.Build.JobName] = result.Build
 	}
+	pr.SetLastStartedCIBuilds(builds)
 
 	if len(errs) > 0 {
 		return errors.Join(errs...)

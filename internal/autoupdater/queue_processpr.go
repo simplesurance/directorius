@@ -7,10 +7,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/simplesurance/directorius/internal/githubclt"
-	"github.com/simplesurance/directorius/internal/logfields"
-
 	"go.uber.org/zap"
+
+	"github.com/simplesurance/directorius/internal/githubclt"
+	"github.com/simplesurance/directorius/internal/jenkins"
+	"github.com/simplesurance/directorius/internal/logfields"
 )
 
 type Action int
@@ -148,6 +149,7 @@ func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRe
 		)
 		// TODO: rerun the update loop, instead of continuing with the wrong information!
 	}
+
 	switch status.CIStatus {
 	case githubclt.CIStatusSuccess:
 		return &requiredActions{
@@ -168,38 +170,86 @@ func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRe
 		}, nil
 
 	case githubclt.CIStatusFailure:
-		newestBuildFailed, err := pr.FailedCIStatusIsForNewestBuild(logger, status.Statuses)
-		if err != nil {
-			// suspend the PR to prevent that it is stuck #1 with failed CI checks
-			return &requiredActions{
-				Actions:      []Action{ActionSuspend},
-				Reason:       reasonCIStatusFailure + ": " + err.Error(),
-				HeadCommitID: updateHeadCommit,
-			}, nil
+		if len(status.Statuses) == 0 {
+			return nil, errors.New("ready for merge status has negative CI status but statuses list is empty")
 		}
 
-		if newestBuildFailed {
-			return &requiredActions{
-				Actions:      []Action{ActionSuspend},
-				Reason:       reasonCIStatusFailure,
-				HeadCommitID: updateHeadCommit,
-			}, nil
-		}
-
-		logger.Debug("status check is negative "+
-			"but none of the affected ci builds are in the list "+
-			"of recently triggered required jobs, pr is not suspended",
-			zap.Any("ci.build.last_triggered", pr.LastStartedCIBuilds),
-			zap.Any("github.ci_statuses", status),
+		failedStatusesAreObsolete, err := q.failedRequiredCIStatusesAreObsolete(
+			status.Statuses,
+			pr.GetLastStartedCIBuilds(),
 		)
+		if err != nil {
+			return nil, err
+		}
+
+		if failedStatusesAreObsolete {
+			logger.Debug("status check is negative "+
+				"but none of the affected ci builds are in the list "+
+				"of recently triggered required jobs, pr is not suspended",
+				zap.Any("ci.build.last_triggered", pr.lastStartedCIBuilds),
+				zap.Any("github.ci_statuses", status),
+			)
+
+			return &requiredActions{
+				Actions:      []Action{ActionNone},
+				Reason:       reasonPreviousCIJobsFailed,
+				HeadCommitID: updateHeadCommit,
+			}, nil
+		}
+
 		return &requiredActions{
-			Actions:      []Action{ActionNone},
-			Reason:       reasonPreviousCIJobsFailed,
+			Actions:      []Action{ActionSuspend},
+			Reason:       reasonCIStatusFailure,
 			HeadCommitID: updateHeadCommit,
 		}, nil
 
 	default:
-		logger.DPanic("BUG:pull request ci status has unexpected value")
+		logger.DPanic("BUG: pull request ci status has unexpected value")
 		return nil, fmt.Errorf("BUG: pull request ci status has unexpected value: %q", status.CIStatus)
 	}
+}
+
+func failedRequiredStatuses(statuses []*githubclt.CIJobStatus) []*githubclt.CIJobStatus {
+	var result []*githubclt.CIJobStatus
+
+	for _, s := range statuses {
+		if s.Required && s.Status == githubclt.CIStatusFailure {
+			result = append(result, s)
+		}
+	}
+
+	return result
+}
+
+// failedRequiredCIStatusesAreObsolete returns true when for each failed and
+// required status an entry in lastStartedCIBuilds exist that has a higher
+// build number.
+func (q *queue) failedRequiredCIStatusesAreObsolete(statuses []*githubclt.CIJobStatus, lastStartedCIBuilds map[string]*jenkins.Build) (bool, error) {
+	for _, s := range failedRequiredStatuses(statuses) {
+		failedBuild, err := jenkins.ParseBuildURL(s.JobURL)
+		if err != nil {
+			return false, fmt.Errorf("parsing ci job url (%q) as jenkins build url failed: %w", s.JobURL, err)
+		}
+
+		lastBuild, exist := lastStartedCIBuilds[failedBuild.JobName]
+		if !exist {
+			q.logger.Debug("ci job status is for job that has not been triggered",
+				logfields.CIJob(failedBuild.JobName),
+				zap.Stringer("ci.latest_build", lastBuild),
+				zap.Stringer("github.ci_failed_status_build", failedBuild),
+			)
+			return false, nil
+		}
+
+		if failedBuild.Number >= lastBuild.Number {
+			q.logger.Debug("failed ci job status is for latest or newer build",
+				logfields.CIJob(failedBuild.JobName),
+				zap.Stringer("ci.latest_build", lastBuild),
+				zap.Stringer("github.ci_failed_status_build", failedBuild),
+			)
+			return false, nil
+		}
+	}
+
+	return true, nil
 }

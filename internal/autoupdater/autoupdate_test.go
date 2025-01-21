@@ -29,12 +29,21 @@ const (
 	repo           = "repo"
 	repoOwner      = "testman"
 	queueHeadLabel = "first"
+	prBranch       = "prbr"
+	prNR           = 101
 )
 
 const (
 	condCheckInterval = 20 * time.Millisecond
 	condWaitTimeout   = 5 * time.Second
 )
+
+func forwardLogsToTestLogger(t *testing.T) *zap.Logger {
+	t.Helper()
+	l := zaptest.NewLogger(t).Named(t.Name())
+	t.Cleanup(zap.ReplaceGlobals(l))
+	return l
+}
 
 func mockSuccessfulGithubAddLabelQueueHeadCall(clt *mocks.MockGithubClient, expectedPRNr int) *gomock.Call {
 	return clt.
