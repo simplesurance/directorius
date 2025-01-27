@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -13,31 +14,6 @@ import (
 	"github.com/simplesurance/directorius/internal/jenkins"
 	"github.com/simplesurance/directorius/internal/retry"
 )
-
-// func TestFailedCIStatusIsForNewestBuild_ReturnsErrWhenMissing(t *testing.T) {
-// 	l := forwardLogsToTestLogger(t)
-// 	pr, err := NewPullRequest(1, "mybr", "me", "abc", "here")
-// 	require.NoError(t, err)
-//
-// 	statuses := []*githubclt.CIJobStatus{{
-// 		Name:     "build",
-// 		Status:   githubclt.CIStatusFailure,
-// 		Required: true,
-// 		JobURL:   "http://localhost/job/build/1234/",
-// 	}}
-// 	newest, err := pr.FailedCIStatusIsForNewestBuild(l, statuses)
-// 	require.NoError(t, err)
-// 	assert.False(t, newest)
-//
-// 	b, err := jenkins.ParseBuildURL("http://localhost/job/check/1/")
-// 	require.NoError(t, err)
-//
-// 	pr.lastStartedCIBuilds["check"] = b
-//
-// 	newest, err = pr.FailedCIStatusIsForNewestBuild(l, statuses)
-// 	assert.False(t, newest)
-// 	require.ErrorIs(t, err, ErrNotFound)
-// }
 
 type evalPRTest struct {
 	Q     *queue
@@ -62,7 +38,7 @@ func initEvalPRActionTest(t *testing.T) *evalPRTest {
 
 	bb, err := NewBaseBranch(repoOwner, repo, "main")
 	require.NoError(t, err)
-	ci := &CI{Client: ciClient}
+	ci := &CI{Client: ciClient, logger: l}
 	q := newQueue(bb, l, ghClient, retry.NewRetryer(), ci, queueHeadLabel)
 	t.Cleanup(q.Stop)
 
@@ -100,14 +76,20 @@ func successfulCIJobStatuses() []*githubclt.CIJobStatus {
 	}
 }
 
+func jenkinsJobURL(jobName, buildNr string) string {
+	return "http://localhost.test/job/" + jobName + "/" + buildNr
+}
+
+const failedCIJobName = "integrationtest"
+
 func failedCIJobStatuses() []*githubclt.CIJobStatus {
 	return append(
 		successfulCIJobStatuses(),
 		&githubclt.CIJobStatus{
-			Name:     "integrationtest",
+			Name:     failedCIJobName,
 			Required: true,
 			Status:   githubclt.CIStatusFailure,
-			JobURL:   "http://localhost/job/integrationtest/1",
+			JobURL:   jenkinsJobURL(failedCIJobName, "1"),
 		})
 }
 
@@ -123,7 +105,7 @@ func TestEvalPRAction_SuspendActionOnNotTriggeredFailedCIStatus(t *testing.T) {
 			}, nil
 		}).Times(1)
 
-	jb, err := jenkins.ParseBuildURL("http://localhost/job/check/1")
+	jb, err := jenkins.ParseBuildURL(jenkinsJobURL("check", "1"))
 	require.NoError(t, err)
 	prt.PR.SetLastStartedCIBuilds(map[string]*jenkins.Build{"check": jb})
 
@@ -132,4 +114,78 @@ func TestEvalPRAction_SuspendActionOnNotTriggeredFailedCIStatus(t *testing.T) {
 	require.NotNil(t, reqActions)
 	require.Len(t, reqActions.Actions, 1)
 	require.Equal(t, ActionSuspend, reqActions.Actions[0])
+}
+
+func TestEvalPRAction_PRNotSuspendforObsoleteCIBuildFailures(t *testing.T) {
+	const ciJobName = "check"
+
+	prt := initEvalPRActionTest(t)
+	prt.PR.lastStartedCIBuilds = map[string]*jenkins.Build{
+		ciJobName: {
+			JobName: ciJobName,
+			Number:  2,
+		},
+	}
+
+	prt.GhClt.
+		EXPECT().
+		ReadyForMerge(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(prNR)).
+		DoAndReturn(func(context.Context, string, string, int) (*githubclt.ReadyForMergeStatus, error) {
+			return &githubclt.ReadyForMergeStatus{
+				ReviewDecision: githubclt.ReviewDecisionApproved,
+				CIStatus:       githubclt.CIStatusFailure,
+				Statuses: append(successfulCIJobStatuses(),
+					&githubclt.CIJobStatus{
+						Name:     ciJobName,
+						Status:   githubclt.CIStatusFailure,
+						Required: true,
+						JobURL:   jenkinsJobURL(ciJobName, "1"),
+					}),
+			}, nil
+		}).Times(1)
+	reqActions, err := prt.Q.evalPRAction(context.Background(), prt.L, prt.PR)
+	require.NoError(t, err)
+	require.NotNil(t, reqActions)
+	require.Len(t, reqActions.Actions, 1)
+	require.Equal(t, ActionNone, reqActions.Actions[0])
+}
+
+func TestEvalPRAction_PendingCIJobs(t *testing.T) {
+	prt := initEvalPRActionTest(t)
+
+	prt.GhClt.
+		EXPECT().
+		ReadyForMerge(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(prNR)).
+		DoAndReturn(func(context.Context, string, string, int) (*githubclt.ReadyForMergeStatus, error) {
+			return &githubclt.ReadyForMergeStatus{
+				ReviewDecision: githubclt.ReviewDecisionApproved,
+				CIStatus:       githubclt.CIStatusPending,
+				Statuses: []*githubclt.CIJobStatus{
+					{
+						Name:     "build",
+						Required: true,
+						Status:   githubclt.CIStatusPending,
+						JobURL:   "http://localhost/job/build/1",
+					},
+					{
+						Name:     "unittest",
+						Required: true,
+						Status:   githubclt.CIStatusSuccess,
+						JobURL:   "http://localhost/job/unittest/1",
+					},
+					{
+						Name:     "check",
+						Required: true,
+						Status:   githubclt.CIStatusPending,
+						JobURL:   "http://localhost/job/check/1",
+					},
+				},
+			}, nil
+		}).Times(1)
+	reqActions, err := prt.Q.evalPRAction(context.Background(), prt.L, prt.PR)
+	require.NoError(t, err)
+	require.NotNil(t, reqActions)
+	require.Len(t, reqActions.Actions, 2)
+	assert.Contains(t, reqActions.Actions, ActionAddFirstInQueueGithubLabel)
+	assert.Contains(t, reqActions.Actions, ActionCreateSuccessfulGithubStatus)
 }

@@ -26,11 +26,12 @@ import (
 )
 
 const (
-	repo           = "repo"
-	repoOwner      = "testman"
-	queueHeadLabel = "first"
-	prBranch       = "prbr"
-	prNR           = 101
+	repo              = "repo"
+	repoOwner         = "testman"
+	queueHeadLabel    = "first"
+	prBranch          = "prbr"
+	prNR              = 101
+	ciJobExpectedName = "checks"
 )
 
 const (
@@ -142,6 +143,12 @@ func mockReadyForMergeStatus(clt *mocks.MockGithubClient, prNumber int, reviewDe
 		ReadyForMergeStatus: githubclt.ReadyForMergeStatus{
 			ReviewDecision: reviewDecision,
 			CIStatus:       checkState,
+			Statuses: []*githubclt.CIJobStatus{{
+				Name:     ciJobExpectedName,
+				Status:   checkState,
+				Required: true,
+				JobURL:   "https://localhost/job/" + ciJobExpectedName + "/1/",
+			}},
 		},
 	}
 
@@ -277,7 +284,7 @@ func TestPushToBaseBranchTriggersUpdate(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, pr.Number, true).Times(2)
 	mockReadyForMergeStatus(
 		ghClient, pr.Number,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).AnyTimes()
 
 	autoupdater := newAutoupdater(
@@ -323,7 +330,7 @@ func TestPushToBaseBranchResumesPRs(t *testing.T) {
 
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).AnyTimes()
 	mockFailedGithubUpdateBranchCall(ghClient, prNumber)
 
@@ -380,7 +387,7 @@ func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).Times(2)
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).AnyTimes()
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(2)
@@ -443,7 +450,7 @@ func TestUnlabellingPRDequeuesPR(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, true).Times(1)
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).Times(1)
 
 	autoupdater := newAutoupdater(
@@ -495,7 +502,7 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).Times(1)
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).AnyTimes()
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
@@ -782,19 +789,19 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 
 			mergeStatusPr1 := mockReadyForMergeStatus(
 				ghClient, 1,
-				githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+				githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 			)
 			mergeStatusPr1.AnyTimes()
 
 			mergeStatusPr2 := mockReadyForMergeStatus(
 				ghClient, 2,
-				githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+				githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 			)
 			mergeStatusPr2.AnyTimes()
 
 			mergeStatusPr3 := mockReadyForMergeStatus(
 				ghClient, 3,
-				githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+				githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 			)
 			mergeStatusPr3.AnyTimes()
 
@@ -869,8 +876,8 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 			waitForActiveQueueLen(t, queueBaseBranch2, 1)
 			assert.Equal(t, 0, queueBaseBranch2.suspendedLen(), "suspend queue")
 
-			mergeStatusPr1.CIStatus = githubclt.CIStatusFailure
-			mergeStatusPr3.CIStatus = githubclt.CIStatusFailure
+			setReadyForMergeCiStatus(&mergeStatusPr1.ReadyForMergeStatus, githubclt.CIStatusFailure)
+			setReadyForMergeCiStatus(&mergeStatusPr3.ReadyForMergeStatus, githubclt.CIStatusFailure)
 			evChan <- tc.newResumeEventFn(pr1.Branch, pr2.Branch, pr3.Branch)
 
 			waitForSuspendQueueLen(t, queueBaseBranch1, 1)
@@ -880,6 +887,13 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 			assert.Equal(t, 1, queueBaseBranch2.suspendedLen(), "suspend queue")
 		})
 	}
+}
+
+func setReadyForMergeCiStatus(ciStatus *githubclt.ReadyForMergeStatus, newStatus githubclt.CIStatus) {
+	for _, s := range ciStatus.Statuses {
+		s.Status = newStatus
+	}
+	ciStatus.CIStatus = newStatus
 }
 
 func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
@@ -898,7 +912,7 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).MinTimes(2)
 	mockReadyForMergeStatus(
 		ghClient, 1,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).MinTimes(2)
 
 	autoupdater := newAutoupdater(
@@ -1033,7 +1047,7 @@ func TestEnqueueDequeueByAutomergeEvents(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, true).Times(1)
 	mockReadyForMergeStatus(
 		ghClient, 1,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).AnyTimes()
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
 	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
@@ -1084,11 +1098,11 @@ func TestInitialSync(t *testing.T) {
 
 	mockReadyForMergeStatus(
 		ghClient, 1,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).AnyTimes()
 	mockReadyForMergeStatus(
 		ghClient, 4,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).AnyTimes()
 
 	ciClient.
@@ -1172,7 +1186,9 @@ func TestInitialSync(t *testing.T) {
 		true,
 		[]string{"queue-add"},
 	)
-	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: "here"}}
+	autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+		ciJobExpectedName: {RelURL: "here"},
+	}
 
 	err := autoupdater.InitSync(context.Background())
 	require.NoError(t, err)
@@ -1213,7 +1229,7 @@ func TestFirstPRInQueueIsUpdatedPeriodically(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, true).AnyTimes()
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).AnyTimes()
 
 	autoupdater := newAutoupdater(
@@ -1319,7 +1335,7 @@ func TestDismissingApprovalSuspendsActivePR(t *testing.T) {
 	mockStatusReturn := mockReadyForMergeStatus(
 		ghClient, prNumber,
 		githubclt.ReviewDecisionApproved,
-		githubclt.CIStatusPending,
+		githubclt.CIStatusExpected,
 	)
 	mockStatusReturn.AnyTimes()
 
@@ -1375,7 +1391,7 @@ func TestRequestingReviewChangesSuspendsPR(t *testing.T) {
 	mockStatusReturn := mockReadyForMergeStatus(
 		ghClient, prNumber,
 		githubclt.ReviewDecisionApproved,
-		githubclt.CIStatusPending,
+		githubclt.CIStatusExpected,
 	)
 	mockStatusReturn.AnyTimes()
 
@@ -1482,7 +1498,7 @@ func TestBaseBranchUpdatesBlockUntilFinished(t *testing.T) {
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
 		githubclt.ReviewDecisionApproved,
-		githubclt.CIStatusPending,
+		githubclt.CIStatusExpected,
 	).MinTimes(1)
 
 	scheduledReturnVal := atomic.Bool{}
@@ -1546,7 +1562,7 @@ func TestPRHeadLabelIsAppliedToNextAfterClose(t *testing.T) {
 	mockSuccessfulGithubUpdateBranchCall(ghClient, pr2Number, true).MaxTimes(1)
 	mockReadyForMergeStatus(
 		ghClient, pr1Number,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).Times(1)
 
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr1Number).Times(1)
@@ -1581,7 +1597,7 @@ func TestPRHeadLabelIsAppliedToNextAfterClose(t *testing.T) {
 	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
 	mockReadyForMergeStatus(
 		ghClient, pr2Number,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).MinTimes(1)
 	mockCreateHeadCommitStatusPendingPRNr(ghClient, pr1Number).Times(1)
 
@@ -1619,7 +1635,7 @@ func TestCIJobsTriggeredOnSync(t *testing.T) {
 
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).Times(2)
 	mockCreateCommitStatusSuccessful(ghClient).Times(1)
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).Times(1)
@@ -1634,7 +1650,9 @@ func TestCIJobsTriggeredOnSync(t *testing.T) {
 		true,
 		nil,
 	)
-	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: "here"}}
+	autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+		ciJobExpectedName: {RelURL: "here"},
+	}
 
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -1676,7 +1694,7 @@ func TestCIJobsNotTriggeredWhenBranchNeedsUpdate(t *testing.T) {
 
 	mockReadyForMergeStatus(
 		ghClient, prNumber,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).Times(1)
 
 	autoupdater := newAutoupdater(
@@ -1687,7 +1705,9 @@ func TestCIJobsNotTriggeredWhenBranchNeedsUpdate(t *testing.T) {
 		true,
 		nil,
 	)
-	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: "here"}}
+	autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+		ciJobExpectedName: {RelURL: "here"},
+	}
 
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)
@@ -1712,7 +1732,7 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 	}
 	tcs := []testcase{
 		{
-			CIStatus:                              githubclt.CIStatusPending,
+			CIStatus:                              githubclt.CIStatusExpected,
 			ExpectedCICalls:                       1,
 			ExpectedAddLabelCalls:                 1,
 			ExpectedSetCommitStateSuccessfulCalls: 1,
@@ -1778,7 +1798,9 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 				true,
 				nil,
 			)
-			autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: "here"}}
+			autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+				ciJobExpectedName: {RelURL: "here"},
+			}
 
 			autoupdater.Start()
 			t.Cleanup(autoupdater.Stop)
@@ -1818,100 +1840,6 @@ func TestPushEventForNotQueuedPR(t *testing.T) {
 	waitForProcessedEventCnt(t, autoupdater, 1)
 }
 
-func TestCIFailuresFromObsoleteBuildsDoNotSuspendPRs(t *testing.T) {
-	const ciJobURLRel = "job/unittests"
-	const ciLastRunBuildURL = "https://localhost.invalid/" + ciJobURLRel + "/2"
-	const ciFailedStatusBuildURLFromPrevRun = "https://localhost.invalid/" + ciJobURLRel + "/1"
-
-	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
-	evChan := make(chan *github_prov.Event, 1)
-	defer close(evChan)
-
-	mockctrl := gomock.NewController(t)
-	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
-	prNumber := 1
-	prBranch := "pr_branch"
-	triggerLabel := "queue-add"
-
-	var readyForMergeCallCnt atomic.Uint32
-	ghClient.
-		EXPECT().
-		ReadyForMerge(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(prNumber)).
-		DoAndReturn(func(context.Context, string, string, int) (*githubclt.ReadyForMergeStatus, error) {
-			cnt := readyForMergeCallCnt.Add(1)
-			if cnt == uint32(2) || cnt == uint32(4) {
-				return &githubclt.ReadyForMergeStatus{
-					ReviewDecision: githubclt.ReviewDecisionApproved,
-					CIStatus:       githubclt.CIStatusFailure,
-					Commit:         dryGitHubClientHeadCommitID,
-					Statuses: []*githubclt.CIJobStatus{{
-						Name:     "unittests",
-						Required: true,
-						JobURL:   ciFailedStatusBuildURLFromPrevRun,
-						Status:   githubclt.CIStatusFailure,
-					}},
-				}, nil
-			}
-			return &githubclt.ReadyForMergeStatus{
-				ReviewDecision: githubclt.ReviewDecisionApproved,
-				CIStatus:       githubclt.CIStatusPending,
-				Commit:         dryGitHubClientHeadCommitID,
-				Statuses: []*githubclt.CIJobStatus{{
-					Name:     "unittests",
-					Required: true,
-					JobURL:   ciFailedStatusBuildURLFromPrevRun,
-					Status:   githubclt.CIStatusPending,
-				}},
-			}, nil
-		}).Times(3)
-
-	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).AnyTimes()
-
-	autoupdater := newAutoupdater(
-		ghClient,
-		ciClient,
-		evChan,
-		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
-		true,
-		[]string{triggerLabel},
-	)
-	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: ciJobURLRel}}
-
-	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
-	mockCreateCommitStatusSuccessful(ghClient).Times(1)
-
-	ciClient.EXPECT().Build(gomock.Any(), gomock.Any()).Times(1)
-	ciClient.EXPECT().GetBuildFromQueueItemID(gomock.Any(), gomock.Any()).Return(jenkins.ParseBuildURL(ciLastRunBuildURL)).Times(1)
-
-	autoupdater.Start()
-	t.Cleanup(autoupdater.Stop)
-
-	baseBranch := "main"
-	evChan <- &github_prov.Event{Event: newPullRequestLabeledEvent(prNumber, prBranch, baseBranch, triggerLabel)}
-	waitForProcessedEventCnt(t, autoupdater, 1)
-
-	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
-	require.NotNil(t, queue)
-	assert.Equal(t, 1, queue.activeLen())
-
-	assert.Equal(t, 1, queue.activeLen())
-	assert.Empty(t, queue.suspended)
-
-	// failure event from previous running CI build that has been canceled
-	evChan <- &github_prov.Event{Event: newStatusEvent("failure", prBranch)}
-	waitForProcessedEventCnt(t, autoupdater, 2)
-	// pending event from last triggered CI build is received afterwards, has no effect
-	evChan <- &github_prov.Event{Event: newStatusEvent("pending", prBranch)}
-	waitForProcessedEventCnt(t, autoupdater, 3)
-	// failure event from another previous running CI build that has been canceled is received
-	evChan <- &github_prov.Event{Event: newStatusEvent("failure", prBranch)}
-	waitForProcessedEventCnt(t, autoupdater, 4)
-
-	assert.Equal(t, 1, queue.activeLen())
-	assert.Empty(t, queue.suspended)
-}
-
 func TestPauseResumeQueue(t *testing.T) {
 	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
 
@@ -1929,7 +1857,7 @@ func TestPauseResumeQueue(t *testing.T) {
 	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr.Number).Times(4)
 	mockReadyForMergeStatus(
 		ghClient, pr.Number,
-		githubclt.ReviewDecisionApproved, githubclt.CIStatusPending,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
 	).Times(4)
 	mockCreateCommitStatusSuccessful(ghClient).AnyTimes()
 
@@ -2012,7 +1940,9 @@ func TestSuccessfulStatusStateIsOnlySetOnce(t *testing.T) {
 		true,
 		nil,
 	)
-	autoupdater.CI.Jobs = []*jenkins.JobTemplate{{RelURL: "here"}}
+	autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+		ciJobExpectedName: {RelURL: "here"},
+	}
 
 	autoupdater.Start()
 	t.Cleanup(autoupdater.Stop)

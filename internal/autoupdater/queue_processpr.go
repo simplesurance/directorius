@@ -32,6 +32,9 @@ type requiredActions struct {
 	Actions      []Action
 	Reason       string
 	HeadCommitID string
+
+	// ExpectedCIRuns is only set when ActionTriggerCIJobs is part of Actions.
+	ExpectedCIRuns []string
 }
 
 func (a Action) String() string {
@@ -66,7 +69,8 @@ func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRe
 		reasonMergeConflict         = "update with base branch failed: merge conflict"
 		reasonBranchUpdatedWithBase = "pull request branch has been updated with base branch"
 		reasonIsStale               = "pull request is stale"
-		reasonCIStatusPending       = "ci jobs are pending"
+		reasonCIStatusExpected      = "ci jobs not running"
+		reasonCIStatusPending       = "ci jobs running"
 		reasonCIStatusFailure       = "ci jobs failed"
 		reasonPreviousCIJobsFailed  = "overall ci job status is negative but none of the last triggered jobs failed"
 		reasonMergeRequirementMet   = "merge requirements are met"
@@ -161,11 +165,22 @@ func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRe
 		return &requiredActions{
 			Actions: []Action{
 				ActionAddFirstInQueueGithubLabel,
-				ActionTriggerCIJobs,
 				ActionCreateSuccessfulGithubStatus,
 			},
 			Reason:       reasonCIStatusPending,
 			HeadCommitID: updateHeadCommit,
+		}, nil
+
+	case githubclt.CIStatusExpected:
+		return &requiredActions{
+			Actions: []Action{
+				ActionAddFirstInQueueGithubLabel,
+				ActionTriggerCIJobs,
+				ActionCreateSuccessfulGithubStatus,
+			},
+			Reason:         reasonCIStatusExpected,
+			HeadCommitID:   updateHeadCommit,
+			ExpectedCIRuns: expectedCIJobs(status.Statuses),
 		}, nil
 
 	case githubclt.CIStatusFailure:
@@ -251,4 +266,13 @@ func (q *queue) failedRequiredCIStatusesAreObsolete(statuses []*githubclt.CIJobS
 	}
 
 	return true, nil
+}
+
+func expectedCIJobs(statuses []*githubclt.CIJobStatus) (result []string) {
+	for _, s := range statuses {
+		if s.Status == githubclt.CIStatusExpected {
+			result = append(result, s.Name)
+		}
+	}
+	return result
 }

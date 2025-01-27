@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/simplesurance/directorius/internal/jenkins"
@@ -14,20 +15,29 @@ import (
 	"go.uber.org/zap"
 )
 
-// RunAll starts builds of all [c.Jobs] and retrieves their URLs.
+// Run starts builds of all [c.Jobs] for pr for that a ciContext is passed.
 // [pr.LastStartedCIBuilds] is overwritten with the URLs of all started builds.
-func (c *CI) RunAll(ctx context.Context, retryer *retry.Retryer, pr *PullRequest) error {
+func (c *CI) Run(ctx context.Context, pr *PullRequest, ciContext ...string) error {
 	var errs []error
 
-	ch := make(chan *runCiResult, len(c.Jobs))
+	ch := make(chan *runCiResult, len(ciContext))
+	var started int
 
-	for _, jobTempl := range c.Jobs {
-		go c.runCIJobToCh(ctx, ch, retryer, pr, jobTempl)
+	for _, ciContext := range ciContext {
+		jobTempl, exists := c.Jobs[strings.ToLower(ciContext)]
+		if !exists {
+			c.logger.Debug(fmt.Sprintf("skipping triggering ci job, a job with the github context %q is not configured", ciContext),
+				pr.LogFields...)
+
+			continue
+		}
+		go c.runCIJobToCh(ctx, ch, c.retryer, pr, jobTempl)
+		started++
 	}
 
-	builds := make(map[string]*jenkins.Build, len(c.Jobs))
+	builds := make(map[string]*jenkins.Build, started)
 
-	for range len(c.Jobs) {
+	for range started {
 		result := <-ch
 		if result.Err != nil {
 			errs = append(errs, result.Err)

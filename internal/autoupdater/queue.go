@@ -604,7 +604,7 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 
 		case ActionTriggerCIJobs:
 			if task == TaskTriggerCI {
-				err := q.ci.RunAll(ctx, q.retryer, pr)
+				err := q.ci.Run(ctx, pr, actions.ExpectedCIRuns...)
 				if err != nil {
 					logger.Error("triggering CI jobs failed",
 						zap.Error(err),

@@ -48,8 +48,9 @@ type BasicAuth struct {
 }
 
 type CIJob struct {
-	URLPath    string            `toml:"url_path"`
-	Parameters map[string]string `toml:"parameters"`
+	URLPath       string            `toml:"url_path"`
+	Parameters    map[string]string `toml:"parameters"`
+	GithubContext string            `toml:"github_context"`
 }
 
 func Load(reader io.Reader) (*Config, error) {

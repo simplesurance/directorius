@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/simplesurance/directorius/internal/autoupdater"
@@ -318,19 +319,41 @@ func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdater.CI {
 
 	}
 
-	var result autoupdater.CI
+	result := autoupdater.CI{
+		Jobs: map[string]*jenkins.JobTemplate{},
+	}
+
 	var err error
 	result.Client, err = jenkins.NewClient(zap.L(), cfg.ServerURL, cfg.BasicAuth.User, cfg.BasicAuth.Password)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: config file: %s: ci.server_url is defined but no ci.jobs are defined\n", *args.ConfigFile)
 		os.Exit(1)
 	}
-	for _, job := range cfg.Jobs {
-		result.Jobs = append(result.Jobs, &jenkins.JobTemplate{
+
+	for i, job := range cfg.Jobs {
+		if job.GithubContext == "" {
+			fmt.Fprintf(os.Stderr, "ERROR: config file: %s: ci.server_url.job[%d] github_context is empty\n", *args.ConfigFile, i)
+			os.Exit(1)
+		}
+
+		if job.URLPath == "" {
+			fmt.Fprintf(os.Stderr, "ERROR: config file: %s: ci.server_url.job[%d] URLPath is empty\n", *args.ConfigFile, i)
+			os.Exit(1)
+		}
+
+		if _, exists := result.Jobs[job.GithubContext]; exists {
+			fmt.Fprintf(os.Stderr,
+				"ERROR: config file: %s: ci.server_url.job, multiple jobs with same github context %q are defined, context must be unique\n",
+				*args.ConfigFile, job.GithubContext)
+			os.Exit(1)
+		}
+
+		result.Jobs[strings.ToLower(job.GithubContext)] = &jenkins.JobTemplate{
 			RelURL:     job.URLPath,
 			Parameters: job.Parameters,
-		})
+		}
 	}
+
 	return &result
 }
 

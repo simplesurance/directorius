@@ -50,12 +50,15 @@ queue_pr_head_label = "autoupdater-first"
 
   [[ci.job]]
     url_path = "job/check/{{ queryescape .Branch }}"
+    github_context = "check"
 
   [[ci.job]]
     url_path = "job/build/{{ queryescape .PullRequestNr }}"
+    github_context = "build"
 
   [[ci.job]]
     url_path = "job/test/"
+    github_context = "test"
 
     [ci.job.parameters]
       branch = "{{ .Branch }}"

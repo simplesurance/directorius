@@ -38,7 +38,8 @@ type CIClient interface {
 
 type CI struct {
 	Client CIClient
-	Jobs   []*jenkins.JobTemplate
+	// Jobs is map of github-status-context -> JobTemplate.
+	Jobs map[string]*jenkins.JobTemplate
 
 	retryer *retry.Retryer
 	logger  *zap.Logger
@@ -60,6 +61,10 @@ func (cfg *Config) setDefaults() {
 	if cfg.CI != nil {
 		cfg.CI.retryer = cfg.Retryer
 		cfg.CI.logger = cfg.Logger.Named("ci")
+
+		if cfg.CI.Jobs == nil {
+			cfg.CI.Jobs = map[string]*jenkins.JobTemplate{}
+		}
 	}
 }
 
