@@ -7,13 +7,15 @@ import (
 	"github.com/shurcooL/githubv4"
 )
 
-// CIStatus abstracts the multiple result values of GitHub check runs and
-// Commit statuses into a single value.
+// CIStatus is the result or current status of a CI job.
 type CIStatus string
 
 const (
-	CIStatusSuccess CIStatus = "SUCCESS"
+	// CIStatusExpected means that the execution of the job is outstanding.
+	CIStatusExpected CIStatus = "EXPECTED"
+	// CIStatusPending is the status when a job is currently running.
 	CIStatusPending CIStatus = "PENDING"
+	CIStatusSuccess CIStatus = "SUCCESS"
 	CIStatusFailure CIStatus = "FAILURE"
 )
 
@@ -46,12 +48,13 @@ type ReadyForMergeStatus struct {
 
 // ReadyForMerge returns the [review decision] and [status check rollup] for a PR.
 //
-// The returned [ReadyForMergeStatus.CIStatus] is [CIStatusPending], if one or
-// more checks or status are in pending state.
+// The status of checks that are not required is ignored.
+// If a required check failed the returned [ReadyForMerge.CIStatus] is
+// [CIStatusFailure].
+// If a check or status has not started yet but is required, it is [CIStatusExpected].
+// If a check or status is running and all others succeeded or also still it is [CIStatusPending].
 // It is [CIStatusSuccess], if no check or status is in pending state and all
 // required ones succeeded.
-// If a required check or status is in failed state the CIStatus is
-// [CIStatusFailure].
 //
 // [status check rollup]: https://docs.github.com/en/graphql/reference/objects#statuscheckrollup
 // [review decision]: https://docs.github.com/en/graphql/reference/enums#pullrequestreviewdecision
@@ -74,18 +77,29 @@ func (clt *Client) ReadyForMerge(ctx context.Context, owner, repo string, prNumb
 }
 
 func overallCIStatus(statusCheckRollupState githubv4.StatusState, statuses []*CIJobStatus) CIStatus {
-	if statusCheckRollupState == githubv4.StatusStatePending {
+	switch statusCheckRollupState {
+	case githubv4.StatusStatePending:
 		return CIStatusPending
+	case githubv4.StatusStateExpected:
+		return CIStatusExpected
 	}
 
 	result := CIStatusSuccess
 	for _, status := range statuses {
-		if status.Status == CIStatusPending {
-			result = CIStatusPending
+		if !status.Required {
 			continue
 		}
 
-		if status.Required && status.Status == CIStatusFailure {
+		switch status.Status {
+		case CIStatusExpected:
+			result = CIStatusExpected
+
+		case CIStatusPending:
+			if result != CIStatusExpected {
+				result = CIStatusPending
+			}
+
+		case CIStatusFailure:
 			return CIStatusFailure
 		}
 	}
@@ -106,7 +120,7 @@ func toCIJobStatuses(
 
 		statusesByName[context] = &CIJobStatus{
 			Name:     context,
-			Status:   CIStatusPending,
+			Status:   CIStatusExpected,
 			Required: true,
 		}
 	}
@@ -327,8 +341,10 @@ func contextStatusStateToCIStatus(state githubv4.StatusState) (CIStatus, error) 
 		githubv4.StatusStateFailure:
 		return CIStatusFailure, nil
 
-	case githubv4.StatusStateExpected,
-		githubv4.StatusStatePending:
+	case githubv4.StatusStateExpected:
+		return CIStatusExpected, nil
+
+	case githubv4.StatusStatePending:
 		return CIStatusPending, nil
 
 	case githubv4.StatusStateSuccess:
