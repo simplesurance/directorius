@@ -61,7 +61,6 @@ func (a Action) String() string {
 
 func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRequest) (*requiredActions, error) {
 	const (
-		reasonUndefined             = ""
 		reasonNotApproved           = "not approved"
 		reasonPullRequestClosed     = "pull request is closed"
 		reasonMergeConflict         = "update with base branch failed: merge conflict"
