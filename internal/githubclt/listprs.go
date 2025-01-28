@@ -1,9 +1,11 @@
 package githubclt
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,6 +111,11 @@ func (clt *Client) ListPRs(ctx context.Context, owner, repo string) iter.Seq2[*P
 			vars["pullRequestCursor"] = q.Search.PageInfo.EndCursor
 
 			prs = clt.prsWithLabelQueryToPrsWithLabelResult(&q)
+
+			slices.SortFunc(prs, func(a, b *PR) int {
+				return cmp.Compare(a.Number, b.Number)
+			})
+
 		}
 	}
 }
