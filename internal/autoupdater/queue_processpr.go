@@ -188,8 +188,13 @@ func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRe
 			return nil, errors.New("ready for merge status has negative CI status but statuses list is empty")
 		}
 
+		failedReqStatuses := failedRequiredStatuses(status.Statuses)
+		if len(failedReqStatuses) == 0 {
+			return nil, errors.New("ready for merge status has negative CI status but statuses list has no required and failed statuses")
+		}
+
 		failedStatusesAreObsolete, err := q.failedRequiredCIStatusesAreObsolete(
-			status.Statuses,
+			failedReqStatuses,
 			pr.GetLastStartedCIBuilds(),
 		)
 		if err != nil {
@@ -239,7 +244,7 @@ func failedRequiredStatuses(statuses []*githubclt.CIJobStatus) []*githubclt.CIJo
 // required status an entry in lastStartedCIBuilds exist that has a higher
 // build number.
 func (q *queue) failedRequiredCIStatusesAreObsolete(statuses []*githubclt.CIJobStatus, lastStartedCIBuilds map[string]*jenkins.Build) (bool, error) {
-	for _, s := range failedRequiredStatuses(statuses) {
+	for _, s := range statuses {
 		failedBuild, err := jenkins.ParseBuildURL(s.JobURL)
 		if err != nil {
 			return false, fmt.Errorf("parsing ci job url (%q) as jenkins build url failed: %w", s.JobURL, err)
