@@ -130,7 +130,6 @@ func (clt *Client) prsWithLabelQueryToPrsWithLabelResult(q *listPRsQuery) []*PR 
 		}
 		prR.Statuses = make([]*Status, 0, len(pr.HeadRef.Target.Commit.Status.Contexts))
 		for _, context := range pr.HeadRef.Target.Commit.Status.Contexts {
-			fmt.Println(context.State)
 			prR.Statuses = append(prR.Statuses, &Status{
 				Context: context.Context,
 				// graphql returns states in all uppercase, the
