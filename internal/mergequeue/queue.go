@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"cmp"
@@ -45,14 +45,26 @@ const updateBranchPollInterval = 2 * time.Second
 
 const appName = "directorius"
 
-// queue implements a merge-queue for a specific git base branch.
-// Enqueued pull requests can either be in active or suspended state. Active
-// pull requests are stored in an ordered map. The first pull request in the
-// active queue is processed by [queue.processPR].
+// queue implements a merge-queue for github pull requests.
+// A queue is created per base branch, to that PRs are merged to.
+// The queue separates pull-requests internally into active and suspended ones.
+// The first PR in the active queue is the next that is gonna be merged.
+// For the first PR, Jenkins CI job runs are scheduled and the PR is kept up to
+// date. The actual merge of the PR is expected to be done by an external
+// entity (GitHub) when all conditions are satisfied.
+// For the following PRs in the active queues it is either unknown if they
+// fulfill the merge requirements or they fulfill them partially. Their
+// status is evaluated when they become the first in the queue.
+// Analyzing the state of the first PR in the queue is done by [queue.processPR].
+// Suspended PRs are PRs that do not fulfill the prerequisites for being merged
+// (approval missing, failed CI check, etc).
+// Queued pull requests can either be in active or suspended state. Active pull
+// requests are stored in an ordered map. The first pull request in the active
+// queue is processed by [queue.processPR].
 type queue struct {
 	baseBranch BaseBranch
 
-	// active contains pull requests that are evaluated for satisfying the
+	// active contains prs that are
 	// requirements and are being processed in order
 	active *orderedmap.Map[int, *PullRequest]
 	// suspended contains pull requests that aren't satisfying the
@@ -89,7 +101,13 @@ type queue struct {
 	// pull-request in the active queue
 	headLabel string
 
+	// paused can be set to true to skip processPR operations.
 	paused atomic.Bool
+}
+
+type runningOperation struct {
+	pr         int
+	cancelFunc context.CancelFunc
 }
 
 func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retryer *retry.Retryer, ci *CI, headLabel string) *queue {
@@ -110,7 +128,7 @@ func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retry
 	if qm, err := newQueueMetrics(base.BranchID); err == nil {
 		q.metrics = qm
 	} else {
-		q.logger.Warn("could not create prometheus metrics",
+		q.logger.Warn("creating prometheus metrics failed",
 			zap.Error(err),
 		)
 	}
@@ -118,43 +136,37 @@ func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retry
 	return &q
 }
 
+// Stop empties the active and suspend queues and stops all running tasks.
+// The caller must ensure that nothing is added to the queue while Stop is
+// being executed.
+func (q *queue) Stop() {
+	q.logger.Debug("terminating")
+
+	q.lock.Lock()
+	q.suspended = map[int]*PullRequest{}
+	for prNumber := range q.suspended {
+		_, _ = q._dequeueSuspended(prNumber)
+	}
+
+	q.active.Foreach()(func(pr *PullRequest) bool {
+		q._dequeueActive(pr.Number)
+		return true
+	})
+
+	q.lock.Unlock()
+
+	if running := q.getExecuting(); running != nil {
+		running.cancelFunc()
+	}
+
+	q.logger.Debug("waiting for routines to terminate")
+	q.actionPool.Wait()
+
+	q.logger.Debug("terminated")
+}
+
 func (q *queue) String() string {
 	return fmt.Sprintf("queue for base branch: %s", q.baseBranch.String())
-}
-
-type runningOperation struct {
-	pr         int
-	cancelFunc context.CancelFunc
-}
-
-func (q *queue) getExecuting() *runningOperation {
-	return q.executing.Load()
-}
-
-func (q *queue) setExecuting(v *runningOperation) {
-	q.executing.Store(v)
-}
-
-func (q *queue) getProcessPRRuns() uint64 {
-	return q.processPRruns.Load()
-}
-
-func (q *queue) incProcessPRRuns() {
-	q.processPRruns.Add(1)
-}
-
-// cancelActionForPR cancels a running update operation for the given pull
-// request number.
-// If none is running, nothing is done.
-func (q *queue) cancelActionForPR(prNumber int) {
-	if running := q.getExecuting(); running != nil {
-		if running.pr == prNumber {
-			running.cancelFunc()
-			q.logger.Debug("cancelled running task for pr",
-				logfields.PullRequest(prNumber),
-			)
-		}
-	}
 }
 
 // IsEmpty returns true if the queue contains no active and suspended
@@ -208,11 +220,17 @@ func (q *queue) _enqueueActive(pr *PullRequest) error {
 		"pull request appended to active queue, first element changed, scheduling action",
 	)
 
-	q.scheduleUpdate(context.Background(), pr, TaskTriggerCI)
+	q.scheduleProcessPR(context.Background(), pr, TaskTriggerCI)
 
 	return nil
 }
 
+// SortActiveQueue sorts the PRs in the active queue by the [orderBefore]
+// criteria.
+//
+// The first element in the active queue is static and not reordered.
+// Reordering it would mean that CI jobs most likely would need to rerun from
+// the beginning and all their progress was for nothing.
 func (q *queue) SortActiveQueue() {
 	q.lock.Lock()
 	defer q.lock.Unlock()
@@ -239,7 +257,7 @@ func (q *queue) SortActiveQueue() {
 }
 
 // Enqueue appends a pull request to the active queue.
-// If it is the only element in the queue, the update operation is run for it.
+// If it is the only element in the queue, the processPR operation is run for it.
 // If it already exist, ErrAlreadyExists is returned.
 func (q *queue) Enqueue(pr *PullRequest) error {
 	q.lock.Lock()
@@ -282,7 +300,7 @@ func (q *queue) _dequeueActive(prNumber int) (removedPR, newFirstPr *PullRequest
 
 // Dequeue removes the pull request with the given number from the active or
 // suspended list.
-// If an update operation is currently running for it, it is canceled.
+// If a processPR operation is currently running for it, it is canceled.
 // If the pull request does not exist in the queue, ErrNotFound is returned.
 func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest, error) {
 	q.lock.Lock()
@@ -329,13 +347,13 @@ func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest,
 
 	// TODO: do we really should add the head label here?
 	q.prAddQueueHeadLabel(context.Background(), newFirstElem)
-	q.scheduleUpdate(context.Background(), newFirstElem, TaskNone)
+	q.scheduleProcessPR(context.Background(), newFirstElem, TaskNone)
 
 	return removed, nil
 }
 
-// suspend suspends updates for the pull request with the given number.
-// If an update operation is currently running for it, it is canceled.
+// suspend suspends running the processPR operation for the pull request with the given number.
+// If a processPR operation is currently running for it, it is canceled.
 // If is not active or not queued ErrNotFound is returned.
 func (q *queue) suspend(prNumber int) error {
 	q.lock.Lock()
@@ -371,17 +389,17 @@ func (q *queue) suspend(prNumber int) error {
 	}
 
 	q.logger.Debug(
-		"moving pr to suspend queue changed first element, triggering update",
+		"moving pr to suspend queue changed first element, triggering processPR",
 		zap.Int("github.pull_request_suspended", pr.Number),
 		zap.Int("github.pull_request_new_first", newFirstElem.Number),
 	)
 
-	q.scheduleUpdate(context.Background(), newFirstElem, TaskTriggerCI)
+	q.scheduleProcessPR(context.Background(), newFirstElem, TaskTriggerCI)
 
 	return nil
 }
 
-// ResumeAllPRs resumes updates for all suspended pull requests.
+// ResumeAllPRs moves all suspended PRs to the active queue.
 func (q *queue) ResumeAllPRs() {
 	q.lock.Lock()
 	defer q.lock.Unlock()
@@ -390,7 +408,7 @@ func (q *queue) ResumeAllPRs() {
 		logger := q.logger.With(pr.LogFields...)
 
 		if err := q._enqueueActive(pr); err != nil {
-			logger.Error("could not move PR from suspended to active state",
+			logger.Error("could not move PR from suspended to active queue",
 				zap.Error(err),
 			)
 
@@ -398,13 +416,14 @@ func (q *queue) ResumeAllPRs() {
 		}
 
 		_, _ = q._dequeueSuspended(prNum)
-		logger.Info("autoupdates for pr resumed")
+		logger.Info("moved pr to active queue")
 	}
 }
 
-// ResumePR resumes updates for the pull request with the given number.
-// If the pull request is not queued and suspended ErrNotFound is returned.
-// If the pull request is the only active pull request, the update operation is run for it.
+// ResumePR moves a PR from the suspend queue to the active queue.
+// If the pull request is neither in the active or suspend queue ErrNotFound is
+// returned.
+// If the pull request is the only active pull request, processPR is scheduled.
 func (q *queue) ResumePR(prNumber int) error {
 	q.lock.Lock()
 	pr, err := q._dequeueSuspended(prNumber)
@@ -428,6 +447,8 @@ func (q *queue) ResumePR(prNumber int) error {
 	return nil
 }
 
+// FirstActive returns the first pull request in the active queue.
+// If the queue is empty, nil is returned.
 func (q *queue) FirstActive() *PullRequest {
 	q.lock.Lock()
 	defer q.lock.Unlock()
@@ -441,18 +462,18 @@ func (q *queue) isFirstActive(pr *PullRequest) bool {
 	return first != nil && first.Number == pr.Number
 }
 
-// ScheduleUpdate schedules updating the first pull request in the queue.
-func (q *queue) ScheduleUpdate(ctx context.Context, task Task) {
+// ScheduleProcessPR schedules running [q.processPR] in the [q.actionPool].
+func (q *queue) ScheduleProcessPR(ctx context.Context, task Task) {
 	first := q.FirstActive()
 	if first == nil {
 		q.logger.Debug("ScheduleUpdateFirstPR was called but active queue is empty")
 		return
 	}
 
-	q.scheduleUpdate(ctx, first, task)
+	q.scheduleProcessPR(ctx, first, task)
 }
 
-func (q *queue) scheduleUpdate(ctx context.Context, pr *PullRequest, task Task) {
+func (q *queue) scheduleProcessPR(ctx context.Context, pr *PullRequest, task Task) {
 	q.actionPool.Queue(func() {
 		ctx, cancelFunc := context.WithCancel(ctx)
 		defer cancelFunc()
@@ -463,18 +484,6 @@ func (q *queue) scheduleUpdate(ctx context.Context, pr *PullRequest, task Task) 
 	})
 
 	q.logger.Debug("update scheduled", pr.LogFields...)
-}
-
-func isPRIsClosedErr(err error) bool {
-	const wantedErrStr = "pull request is closed"
-
-	if unWrappedErr := errors.Unwrap(err); unWrappedErr != nil {
-		if strings.Contains(unWrappedErr.Error(), wantedErrStr) {
-			return true
-		}
-	}
-
-	return strings.Contains(err.Error(), wantedErrStr)
 }
 
 // isPRStale returns true if the [pr.GetStateUnchangedSince] timestamp is older then
@@ -492,20 +501,19 @@ func (q *queue) isPRStale(pr *PullRequest) bool {
 	return lastStatusChange.Add(q.staleTimeout).Before(time.Now())
 }
 
-// processPR analyzes the state of a pull request, updates it with is base
-// branch and triggers CI jobs.
-// If the ctx is canceled or the pull request is not the first one in the
-// active queue nothing is done.
+// processPR evaluates the approval, update and CI status of the pull request
+// and the actions to undertake.
+// The PR must be the first in the active queue otherwise nothing is done.
+//
 // If the base-branch contains changes that are not in the pull request branch,
 // updating it, by merging the base-branch into the PR branch, is schedule via
 // the GitHub API. If updating is not possible because a merge-conflict exist
-// or another error happened, a comment is posted to the pull request and
-// updating the pull request is suspended.
-// If it is already uptodate, it's GitHub check, status and review state is
-// retrieved. If it is in a failed CI status and the state is for the last
-// triggered build of the CI Job or error state or the pull request is not
-// approved, the pull request is suspended.
-// If the status is pending a successful github status from directorius is
+// or another error happens, a comment is posted and the pr is suspended.
+// If the PR branch is uptodate, it's GitHub CI and review status is
+// retrieved. If it has a failed CI status and the state is for the last
+// triggered build of the CI Job or the pull request is not approved, the pr is
+// suspended.
+// If the status is pending a successful GitHub status from directorius is
 // submitted for the HEAD commit and the queue head label is added to the pull
 // request.
 // If the pull request was not updated, it's GitHub check status did not change
@@ -664,6 +672,18 @@ func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest) (changed 
 	}
 
 	return changed, headCommit, nil
+}
+
+func isPRIsClosedErr(err error) bool {
+	const wantedErrStr = "pull request is closed"
+
+	if unWrappedErr := errors.Unwrap(err); unWrappedErr != nil {
+		if strings.Contains(unWrappedErr.Error(), wantedErrStr) {
+			return true
+		}
+	}
+
+	return strings.Contains(err.Error(), wantedErrStr)
 }
 
 // prReadyForMergeStatus runs GitHubClient.ReadyForMergeStatus() and retries if
@@ -941,10 +961,9 @@ func (q *queue) resumeIfPRMergeStatusPositive(ctx context.Context, logger *zap.L
 	}
 }
 
-// ScheduleResumePRIfStatusPositive schedules resuming autoupdates for a pull
-// request when it's approved and it's check and status state is success,
-// pending or expected and it's review status is approved.
-func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRequest) {
+// ScheduleProcessPRIfStatusPositive schedules processPR runs for a pull
+// request if they are approved, their CI status not negative.
+func (q *queue) ScheduleProcessPRIfStatusPositive(ctx context.Context, pr *PullRequest) {
 	q.actionPool.Queue(func() {
 		logger := q.logger.With(pr.LogFields...)
 
@@ -967,34 +986,6 @@ func (q *queue) ScheduleResumePRIfStatusPositive(ctx context.Context, pr *PullRe
 	})
 
 	q.logger.Debug("checking PR status scheduled", pr.LogFields...)
-}
-
-// Stop clears all queues and stops running tasks.
-// The caller must ensure that nothing is added to the queue while Stop is running.
-func (q *queue) Stop() {
-	q.logger.Debug("terminating")
-
-	q.lock.Lock()
-	q.suspended = map[int]*PullRequest{}
-	for prNumber := range q.suspended {
-		_, _ = q._dequeueSuspended(prNumber)
-	}
-
-	q.active.Foreach()(func(pr *PullRequest) bool {
-		q._dequeueActive(pr.Number)
-		return true
-	})
-
-	q.lock.Unlock()
-
-	if running := q.getExecuting(); running != nil {
-		running.cancelFunc()
-	}
-
-	q.logger.Debug("waiting for routines to terminate")
-	q.actionPool.Wait()
-
-	q.logger.Debug("terminated")
 }
 
 // SetPRStaleSinceIfNewerByBranch sets the timestamp to when the last change on
@@ -1063,7 +1054,7 @@ func (q *queue) SetPullRequestPriority(prNumber int, priority int32) error {
 // Checking the status and triggering CI jobs for the first PR in the queue are
 // aborted and will be skipped.
 func (q *queue) Pause() {
-	q.logger.Info("pausing mergequeue ")
+	q.logger.Info("pausing mergequeue")
 	q.paused.Store(true)
 
 	if running := q.getExecuting(); running != nil {
@@ -1090,7 +1081,7 @@ func (q *queue) Resume(ctx context.Context) {
 	q.lock.Unlock()
 
 	q.paused.Store(false)
-	q.ScheduleUpdate(ctx, TaskTriggerCI)
+	q.ScheduleProcessPR(ctx, TaskTriggerCI)
 }
 
 // orderBefore returns:
@@ -1146,4 +1137,34 @@ func orderBefore(x, y *PullRequest) int {
 	}
 
 	return cmp.Compare(x.Number, y.Number)
+}
+
+func (q *queue) getExecuting() *runningOperation {
+	return q.executing.Load()
+}
+
+func (q *queue) setExecuting(v *runningOperation) {
+	q.executing.Store(v)
+}
+
+func (q *queue) getProcessPRRuns() uint64 {
+	return q.processPRruns.Load()
+}
+
+func (q *queue) incProcessPRRuns() {
+	q.processPRruns.Add(1)
+}
+
+// cancelActionForPR cancels a running update operation for the given pull
+// request number.
+// If none is running, nothing is done.
+func (q *queue) cancelActionForPR(prNumber int) {
+	if running := q.getExecuting(); running != nil {
+		if running.pr == prNumber {
+			running.cancelFunc()
+			q.logger.Debug("cancelled running task for pr",
+				logfields.PullRequest(prNumber),
+			)
+		}
+	}
 }

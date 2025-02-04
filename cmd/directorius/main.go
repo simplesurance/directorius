@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simplesurance/directorius/internal/autoupdater"
 	"github.com/simplesurance/directorius/internal/cfg"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/jenkins"
+	"github.com/simplesurance/directorius/internal/mergequeue"
 	"github.com/simplesurance/directorius/internal/provider/github"
 	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
@@ -303,7 +303,7 @@ func normalizeHTTPEndpoint(endpoint string) string {
 	return endpoint
 }
 
-func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdater.CI {
+func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *mergequeue.CI {
 	if cfg == nil {
 		return nil
 	}
@@ -319,7 +319,7 @@ func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdater.CI {
 
 	}
 
-	result := autoupdater.CI{
+	result := mergequeue.CI{
 		Jobs: map[string]*jenkins.JobTemplate{},
 	}
 
@@ -357,17 +357,17 @@ func mustConfigCItoAutoupdaterCI(cfg *cfg.CI) *autoupdater.CI {
 	return &result
 }
 
-func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, githubClient *githubclt.Client, mux *http.ServeMux) *autoupdater.Autoupdater {
-	repos := make([]autoupdater.Repository, 0, len(config.Repositories))
+func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, githubClient *githubclt.Client, mux *http.ServeMux) *mergequeue.Coordinator {
+	repos := make([]mergequeue.Repository, 0, len(config.Repositories))
 	for _, r := range config.Repositories {
-		repos = append(repos, autoupdater.Repository{
+		repos = append(repos, mergequeue.Repository{
 			OwnerLogin:     r.Owner,
 			RepositoryName: r.RepositoryName,
 		})
 	}
 
-	au := autoupdater.NewAutoupdater(
-		autoupdater.Config{
+	au := mergequeue.NewCoordinator(
+		mergequeue.Config{
 			GitHubClient:          githubClient,
 			EventChan:             ch,
 			Retryer:               retry.NewRetryer(),
@@ -392,7 +392,7 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, 
 	au.Start()
 
 	if config.WebInterfaceEndpoint != "" {
-		autoupdater.NewHTTPService(au, config.WebInterfaceEndpoint).RegisterHandlers(mux)
+		mergequeue.NewHTTPService(au, config.WebInterfaceEndpoint).RegisterHandlers(mux)
 		logger.Info(
 			"registered github pull request autoupdater http endpoint",
 			zap.String("endpoint", config.WebInterfaceEndpoint),

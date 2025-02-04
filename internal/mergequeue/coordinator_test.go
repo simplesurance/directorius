@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"context"
@@ -16,9 +16,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 
-	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/jenkins"
+	"github.com/simplesurance/directorius/internal/mergequeue/mocks"
 	"github.com/simplesurance/directorius/internal/retry"
 	"github.com/simplesurance/directorius/internal/set"
 
@@ -96,7 +96,7 @@ func mockCreateCommitStatusSuccessful(clt *mocks.MockGithubClient) *gomock.Call 
 		)
 }
 
-func mockCIBuildWithCallCnt(clt *mocks.MockCIClient) *atomic.Uint32 {
+func mockCIBuildWithCallCnt(clt *mocks.MockJenkinsClient) *atomic.Uint32 {
 	var callCounter atomic.Uint32
 
 	clt.
@@ -166,7 +166,7 @@ func mockReadyForMergeStatus(clt *mocks.MockGithubClient, prNumber int, reviewDe
 
 const buildURLFromQueueItemID = "http://localhost.invalid/job/build/1"
 
-func mockGetBuildFromQueueItemID(clt *mocks.MockCIClient) *gomock.Call {
+func mockGetBuildFromQueueItemID(clt *mocks.MockJenkinsClient) *gomock.Call {
 	b, err := jenkins.ParseBuildURL(buildURLFromQueueItemID)
 	return clt.
 		EXPECT().
@@ -212,7 +212,7 @@ func waitForQueueUpdateRunsGreaterThan(t *testing.T, q *queue, v uint64) {
 	)
 }
 
-func waitForProcessedEventCnt(t *testing.T, a *Autoupdater, wantedLen int) {
+func waitForProcessedEventCnt(t *testing.T, a *Coordinator, wantedLen int) {
 	t.Helper()
 
 	require.Eventuallyf(
@@ -250,13 +250,13 @@ func waitForActiveQueueLen(t *testing.T, q *queue, wantedLen int) {
 
 func newAutoupdater(
 	ghClient GithubClient,
-	ciClient CIClient,
+	ciClient JenkinsClient,
 	ch chan *github_prov.Event,
 	repos []Repository,
 	triggerOnAutomerge bool,
 	triggerLabels []string,
-) *Autoupdater {
-	return NewAutoupdater(Config{
+) *Coordinator {
+	return NewCoordinator(Config{
 		GitHubClient:          ghClient,
 		EventChan:             ch,
 		Retryer:               retry.NewRetryer(),
@@ -276,7 +276,7 @@ func TestPushToBaseBranchTriggersUpdate(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	pr, err := NewPullRequest(1, "pr_branch", "", "", "")
 	require.NoError(t, err)
@@ -322,7 +322,7 @@ func TestPushToBaseBranchResumesPRs(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	prBranch := "pr_branch"
@@ -378,7 +378,7 @@ func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	prBranch := "pr_branch"
@@ -441,7 +441,7 @@ func TestUnlabellingPRDequeuesPR(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	prBranch := "pr_branch"
@@ -493,7 +493,7 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	prBranch := "pr_branch"
@@ -599,7 +599,7 @@ func TestSuccessStatusOrCheckEventResumesPRs(t *testing.T) {
 
 			mockctrl := gomock.NewController(t)
 			ghClient := mocks.NewMockGithubClient(mockctrl)
-			ciClient := mocks.NewMockCIClient(mockctrl)
+			ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 			pr1, err := NewPullRequest(1, "pr_branch1", "", "", "")
 			require.NoError(t, err)
@@ -776,7 +776,7 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 
 			mockctrl := gomock.NewController(t)
 			ghClient := mocks.NewMockGithubClient(mockctrl)
-			ciClient := mocks.NewMockCIClient(mockctrl)
+			ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 			pr1, err := NewPullRequest(1, "pr_branch1", "", "", "")
 			require.NoError(t, err)
@@ -904,7 +904,7 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	triggerLabel := "queue-add"
@@ -951,7 +951,7 @@ func TestPRIsSuspendedWhenStatusIsStuck(t *testing.T) {
 	queue.staleTimeout = time.Hour
 	pr.SetStateUnchangedSince(time.Now().Add(-90 * time.Minute))
 
-	queue.ScheduleUpdate(context.Background(), TaskNone)
+	queue.ScheduleProcessPR(context.Background(), TaskNone)
 
 	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
 	waitForSuspendQueueLen(t, queue, 1)
@@ -992,7 +992,7 @@ func TestPRIsSuspendedWhenUptodateAndHasFailedStatus(t *testing.T) {
 
 			mockctrl := gomock.NewController(t)
 			ghClient := mocks.NewMockGithubClient(mockctrl)
-			ciClient := mocks.NewMockCIClient(mockctrl)
+			ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 			prNumber := 1
 			prBranch := "pr_branch"
@@ -1040,7 +1040,7 @@ func TestEnqueueDequeueByAutomergeEvents(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	prBranch := "pr_branch"
@@ -1088,7 +1088,7 @@ func TestInitialSync(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	ghClient.
 		EXPECT().
@@ -1220,7 +1220,7 @@ func TestFirstPRInQueueIsUpdatedPeriodically(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	triggerLabel := "queue-add"
@@ -1271,7 +1271,7 @@ func TestReviewApprovedEventResumesSuspendedPR(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 	prNumber := 1
 	prBranch := "pr_branch"
 	triggerLabel := "queue-add"
@@ -1327,7 +1327,7 @@ func TestDismissingApprovalSuspendsActivePR(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 	prNumber := 1
 	prBranch := "pr_branch"
 	triggerLabel := "queue-add"
@@ -1383,7 +1383,7 @@ func TestRequestingReviewChangesSuspendsPR(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 	prNumber := 1
 	prBranch := "pr_branch"
 	triggerLabel := "queue-add"
@@ -1437,7 +1437,7 @@ func TestUpdatesAreResumedIfTestsFailAndBaseIsUpdated(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 	prNumber := 1
 	prBranch := "pr_branch"
 	triggerLabel := "queue-add"
@@ -1488,7 +1488,7 @@ func TestBaseBranchUpdatesBlockUntilFinished(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 	prNumber := 1
 	prBranch := "pr_branch"
 	triggerLabel := "queue-add"
@@ -1551,7 +1551,7 @@ func TestPRHeadLabelIsAppliedToNextAfterClose(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	pr1Number := 1
 	pr1Branch := "pr_branch"
@@ -1615,7 +1615,7 @@ func TestCIJobsTriggeredOnSync(t *testing.T) {
 	t.Cleanup(func() { close(evChan) })
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	prBranch := "pr_branch"
@@ -1674,7 +1674,7 @@ func TestCIJobsNotTriggeredWhenBranchNeedsUpdate(t *testing.T) {
 	t.Cleanup(func() { close(evChan) })
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	prBranch := "pr_branch"
@@ -1762,7 +1762,7 @@ func TestCIJobsOnlyTriggeredWhenCIStatusIsPending(t *testing.T) {
 			t.Cleanup(func() { close(evChan) })
 			mockctrl := gomock.NewController(t)
 			ghClient := mocks.NewMockGithubClient(mockctrl)
-			ciClient := mocks.NewMockCIClient(mockctrl)
+			ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 			prNumber := 1
 			prBranch := "pr_branch"
@@ -1822,7 +1822,7 @@ func TestPushEventForNotQueuedPR(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	autoupdater := newAutoupdater(
 		ghClient,
@@ -1848,7 +1848,7 @@ func TestPauseResumeQueue(t *testing.T) {
 
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	pr, err := NewPullRequest(1, "pr_branch", "", "", "")
 	require.NoError(t, err)
@@ -1910,7 +1910,7 @@ func TestSuccessfulStatusStateIsOnlySetOnce(t *testing.T) {
 	t.Cleanup(func() { close(evChan) })
 	mockctrl := gomock.NewController(t)
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	prNumber := 1
 	prBranch := "pr_branch"
@@ -1952,7 +1952,7 @@ func TestSuccessfulStatusStateIsOnlySetOnce(t *testing.T) {
 	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
 	require.NotNil(t, queue)
-	queue.ScheduleUpdate(context.Background(), TaskNone)
+	queue.ScheduleProcessPR(context.Background(), TaskNone)
 
 	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
 }

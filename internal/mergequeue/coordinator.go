@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"context"
@@ -22,8 +22,6 @@ import (
 
 const defPeriodicTriggerInterval = 30 * time.Minute
 
-// GithubClient defines the methods of a Github API Client that are used by the
-// autoupdater implementation.
 type GithubClient interface {
 	AddLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
 	CreateCommitStatus(ctx context.Context, owner, repo, commit string, state githubclt.StatusState, description, context string) error
@@ -35,11 +33,15 @@ type GithubClient interface {
 	UpdateBranch(ctx context.Context, owner, repo string, pullRequestNumber int) (*githubclt.UpdateBranchResult, error)
 }
 
-// Autoupdater implements processing webhook events, querying the GitHub API
-// and enqueuing/dequeuing/triggering updating pull requests with the
-// base-branch.
-// Pull request branch updates are serialized per base-branch.
-type Autoupdater struct {
+// Coordinator parses GitHub webhook events for Pull Requests and manages the
+// merge-queues.
+// It adds and removes PRs to merge queues when the [Config.TriggerOnAutomerge]
+// or [Config.TriggerLabels] condition is met.
+// For each git branch, that is a base branch for a PR in the merge-queue, a
+// separate [queue] is created.
+// Webhook events like the submission of a new Check status result in
+// operations on the queue.
+type Coordinator struct {
 	*Config
 
 	// periodicTriggerIntv defines the time span between triggering
@@ -48,7 +50,7 @@ type Autoupdater struct {
 	periodicTriggerIntv time.Duration
 
 	// queues contains a queue for each base-branch for which pull requests
-	// are queued for autoupdates.
+	// are queued for being merged
 	queues map[BranchID]*queue
 	// queuesLock must be hold when accessing queues
 	queuesLock sync.Mutex
@@ -64,16 +66,6 @@ type Autoupdater struct {
 	processedEventCnt atomic.Uint64
 }
 
-// Repository is a datastructure that uniquely identifies a GitHub Repository.
-type Repository struct {
-	OwnerLogin     string
-	RepositoryName string
-}
-
-func (r *Repository) String() string {
-	return fmt.Sprintf("%s/%s", r.OwnerLogin, r.RepositoryName)
-}
-
 type PRPriorityUpdates struct {
 	BranchID BranchID
 	Updates  []*PRPriorityUpdate
@@ -84,15 +76,8 @@ type PRPriorityUpdate struct {
 	Priority int32
 }
 
-// NewAutoupdater creates an Autoupdater instance.
-// Only webhook events for repositories listed in monitoredRepositories are processed.
-// At least one trigger (triggerOnAutomerge or a label in triggerLabels) must
-// be provided to trigger enqueuing pull requests for autoupdates via webhook events.
-// When multiple event triggers are configured, the autoupdater reacts on each
-// received Event individually.
-// headLabel is the name of the GitHub label that is applied to the PR that is the first in the queue.
-func NewAutoupdater(cfg Config) *Autoupdater {
-	a := Autoupdater{
+func NewCoordinator(cfg Config) *Coordinator {
+	a := Coordinator{
 		Config:              &cfg,
 		queues:              map[BranchID]*queue{},
 		wg:                  sync.WaitGroup{},
@@ -114,23 +99,43 @@ func NewAutoupdater(cfg Config) *Autoupdater {
 	return &a
 }
 
-// branchRefToRef returns ref without a leading refs/heads/ prefix.
-func branchRefToRef(ref string) string {
-	return strings.TrimPrefix(ref, "refs/heads/")
+// Start starts a go-routine that consumes and processes github webhook events.
+func (a *Coordinator) Start() {
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		a.eventLoop()
+	}()
 }
 
-func ghBranchesAsStrings(branches []*github.Branch) []string {
-	result := make([]string, 0, len(branches))
+// Stop stops the event loop and waits until it terminates.
+// All queues will be deleted, operations that are in progress are canceled.
+func (a *Coordinator) Stop() {
+	a.Logger.Debug("coordinator terminating")
 
-	for _, branch := range branches {
-		result = append(result, branch.GetName())
+	select {
+	case <-a.shutdownChan: // already closed
+	default:
+		close(a.shutdownChan)
 	}
 
-	return result
+	a.Logger.Debug("waiting for event loop to terminate")
+	a.wg.Wait()
+
+	a.queuesLock.Lock()
+	defer a.queuesLock.Unlock()
+
+	for branchID, q := range a.queues {
+		q.Stop()
+		delete(a.queues, branchID)
+	}
+
+	a.Logger.Debug("coordinator terminated")
 }
 
-// isMonitoredRepository returns true if the repository is listed in the a.monitoredRepos.
-func (a *Autoupdater) isMonitoredRepository(owner, repositoryName string) bool {
+// isMonitoredRepository returns if a merge-queue is managed for the given
+// repository.
+func (a *Coordinator) isMonitoredRepository(owner, repositoryName string) bool {
 	repo := Repository{
 		OwnerLogin:     owner,
 		RepositoryName: repositoryName,
@@ -140,13 +145,13 @@ func (a *Autoupdater) isMonitoredRepository(owner, repositoryName string) bool {
 	return exist
 }
 
-// eventLoop receives GitHub webhook events from the eventChan and trigger
-// periodic update operations on the first element in the queues.
+// eventLoop receives GitHub webhook events from [Coordinator.Config.EventChan]
+// and triggers processPR operations on the first element in the queues.
 // Updates are triggered periodically every a.periodicTriggerIntv, to prevent
-// that pull requests became stuck because GitHub webhook event was missed.
+// that pull requests become stuck because GitHub webhook event was missed.
 // The eventLoop terminates when a.shutdownChan is closed.
-func (a *Autoupdater) eventLoop() {
-	a.Logger.Info("autoupdater event loop started")
+func (a *Coordinator) eventLoop() {
+	a.Logger.Info("coordinator event loop started")
 
 	periodicTrigger := time.NewTicker(a.periodicTriggerIntv)
 	defer periodicTrigger.Stop()
@@ -155,7 +160,7 @@ func (a *Autoupdater) eventLoop() {
 		select {
 		case event, open := <-a.EventChan:
 			if !open {
-				a.Logger.Info("autoupdater event loop terminated")
+				a.Logger.Info("coordinator event loop terminated")
 				return
 			}
 
@@ -164,7 +169,7 @@ func (a *Autoupdater) eventLoop() {
 		case <-periodicTrigger.C:
 			a.queuesLock.Lock()
 			for _, q := range a.queues {
-				q.ScheduleUpdate(context.Background(), TaskNone)
+				q.ScheduleProcessPR(context.Background(), TaskNone)
 				a.Logger.Debug("periodic run scheduled", q.baseBranch.Logfields...)
 			}
 			a.queuesLock.Unlock()
@@ -178,12 +183,12 @@ func (a *Autoupdater) eventLoop() {
 
 // processEvent processes GitHub webhook events.
 //
-// Only events for repositories listed in a.monitoredRepositories are
-// processed.
+// Events for repositories that are not listed in
+// [Config.MonitoredRepositories] are ignored.
 // auto_merge_enabled/auto_merge_disabled events are only processed when
-// a.triggerOnAutomergeis enabled.
+// [Config.TriggerOnAutomerge] is enabled.
 // labeled/unlabeled events are only processed if the label is listed in
-// a.triggerLabels.
+// [Config.HeadLabel]
 //
 // The following actions are triggered on events:
 //
@@ -222,7 +227,7 @@ func (a *Autoupdater) eventLoop() {
 //     conclusion
 //
 // Other events are ignored and a debug message is logged for those.
-func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event) {
+func (a *Coordinator) processEvent(ctx context.Context, event *github_prov.Event) {
 	defer func() {
 		a.processedEventCnt.Add(1)
 		metrics.ProcessedEventsInc()
@@ -234,7 +239,6 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 	case *github.PullRequestEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
 			logger.Debug("event is for unmonitored repository")
-
 			return
 		}
 
@@ -242,8 +246,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.PushEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug("event is for repository that is not monitored")
-
+			logger.Debug("event is for unmonitored repository")
 			return
 		}
 
@@ -251,8 +254,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.StatusEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug("event is for repository that is not monitored")
-
+			logger.Debug("event is for unmonitored repository")
 			return
 		}
 
@@ -260,16 +262,14 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 
 	case *github.CheckRunEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug("event is for repository that is not monitored")
-
+			logger.Debug("event is for unmonitored repository")
 			return
 		}
 		a.processCheckRunEvent(ctx, logger, ev)
 
 	case *github.PullRequestReviewEvent:
 		if !a.isMonitoredRepository(ev.GetRepo().GetOwner().GetLogin(), ev.GetRepo().GetName()) {
-			logger.Debug("event is for repository that is not monitored")
-
+			logger.Debug("event is for unmonitored repository")
 			return
 		}
 
@@ -280,21 +280,7 @@ func (a *Autoupdater) processEvent(ctx context.Context, event *github_prov.Event
 	}
 }
 
-// logError logs an error with the given message and fields.
-// If the error is of type ErrNotFound or ErrAlreadyExists the message is
-// logged with Info priority, otherwise with Error priority.
-func logError(logger *zap.Logger, msg string, err error, fields ...zapcore.Field) {
-	fields = append([]zapcore.Field{zap.Error(err)}, fields...)
-
-	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrAlreadyExists) {
-		logger.Info(msg, fields...)
-		return
-	}
-
-	logger.Error(msg, fields...)
-}
-
-func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.Logger, ev *github.PullRequestEvent) {
+func (a *Coordinator) processPullRequestEvent(ctx context.Context, logger *zap.Logger, ev *github.PullRequestEvent) {
 	owner := ev.GetRepo().GetOwner().GetLogin()
 	repo := ev.GetRepo().GetName()
 	baseBranch := ev.GetPullRequest().GetBase().GetRef()
@@ -314,10 +300,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 	logger.Debug("event received")
 
 	switch action := ev.GetAction(); action {
-	// TODO: If a pull request is opened and in the open-dialog is
-	// already the applied, will we receive a label-add event? Or do we
-	// also have to monitor Open-Events for PRs that have the label already?
-
 	case "auto_merge_enabled":
 		if !a.TriggerOnAutomerge {
 			logger.Debug(
@@ -332,7 +314,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, incomplete base branch information",
 				zap.Error(err),
 			)
-
 			return
 		}
 
@@ -342,7 +323,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, incomplete pull request information",
 				zap.Error(err),
 			)
-
 			return
 		}
 
@@ -352,12 +332,11 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, could not append pull request to queue",
 				err,
 			)
-
 			return
 		}
 
 		logger.Info(
-			"pull request enqueued for updates",
+			"added pull request to merge queue ",
 			logfields.Reason("auto_merge_enabled"),
 		)
 
@@ -369,7 +348,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			logger.Warn(
 				"ignoring event, label was added to a closed pull request",
 			)
-
 			return
 		}
 
@@ -377,7 +355,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			logger.Warn(
 				"ignoring event, event with action 'labeled' has empty label name",
 			)
-
 			return
 		}
 
@@ -391,7 +368,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, incomplete base branch information",
 				zap.Error(err),
 			)
-
 			return
 		}
 
@@ -402,7 +378,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, incomplete pull request information",
 				err,
 			)
-
 			return
 		}
 
@@ -411,12 +386,11 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, enqueing pull request failed",
 				zap.Error(err),
 			)
-
 			return
 		}
 
 		logger.Info(
-			"pull request enqueued for updates",
+			"added pull request to merge queue",
 			logfields.Reason("labeled"),
 		)
 
@@ -425,11 +399,11 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			logger.Debug(
 				"event ignored, triggerOnAutomerge is disabled",
 			)
-
 			return
 		}
 
 		fallthrough
+
 	case "closed":
 		bb, err := NewBaseBranch(owner, repo, baseBranch)
 		if err != nil {
@@ -437,7 +411,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, incomplete base branch information",
 				zap.Error(err),
 			)
-
 			return
 		}
 
@@ -447,7 +420,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, incomplete pull request information",
 				zap.Error(err),
 			)
-
 			return
 		}
 
@@ -455,7 +427,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		if err != nil {
 			logError(
 				logger,
-				"ignoring event, disabling updates for pr failed",
+				"removing closed PR from merge queue failed",
 				err,
 			)
 			return
@@ -472,7 +444,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			reason = logfields.Reason(action)
 		}
 
-		logger.Info("pull request dequeued for updates", reason)
+		logger.Info("removed pull request from merge queue", reason)
 
 	case "unlabeled":
 		labelName := ev.GetLabel().GetName()
@@ -482,7 +454,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			logger.Warn(
 				"ignoring event, event with action 'unlabeled' has empty label name",
 			)
-
 			return
 		}
 
@@ -496,7 +467,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, incomplete base branch information",
 				zap.Error(err),
 			)
-
 			return
 		}
 
@@ -506,19 +476,22 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				"ignoring event, incomplete pull request information",
 				zap.Error(err),
 			)
-
 			return
 		}
 
 		_, err = a.Dequeue(ctx, bb, pr.Number, true)
 		if err != nil {
-			logError(logger, "ignoring event, disabling updates for pr failed", err)
+			logError(
+				logger,
+				"removing PR from merge queue failed",
+				err,
+			)
 
 			return
 		}
 
 		logger.Info(
-			"pull request dequeued for updates",
+			"removed pull request from merge queue",
 			logfields.Reason("unlabeled"),
 		)
 
@@ -533,20 +506,19 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			return
 		}
 
-		_, err = a.TriggerUpdateIfFirst(ctx, bb, &PRNumber{Number: prNumber}, TaskTriggerCI)
+		_, err = a.TriggerProcessPRIfFirst(ctx, bb, &PRNumber{Number: prNumber}, TaskTriggerCI)
 		if err == nil {
 			logger.Info(
-				"update for pull request triggered",
+				"processing pr for pull request scheduled",
 				logfields.Reason("branch_changed"),
 			)
-
 			// Resume not necessary, PR is already in the active
 			// queue and the first element
 			return
 		}
 
 		if !errors.Is(err, ErrNotFound) {
-			logger.Error("triggering update for first pr failed", zap.Error(err))
+			logger.Error("scheduling processing pr for first pr failed", zap.Error(err))
 		}
 
 		err = a.Resume(ctx, bb, prNumber)
@@ -556,8 +528,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 				return
 			}
 
-			logger.Error("resuming updates for prs failed", zap.Error(err))
-
+			logger.Error("moving pr from active queued to suspend queue failed", zap.Error(err))
 			return
 		}
 
@@ -565,7 +536,6 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 			"updates resumed, pr branch changed",
 			logfields.Reason("branch_changed"),
 		)
-
 		return
 
 	case "edited":
@@ -587,7 +557,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		bb, err := NewBaseBranch(owner, repo, baseBranch)
 		if err != nil {
 			logger.Warn(
-				"can not enqueue PR after base branch change, incomplete new base branch information",
+				"can not enqueue PR after base branch change, base branch information are incomplete",
 				zap.Error(err),
 			)
 
@@ -606,7 +576,7 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 		}
 
 		logger.Info(
-			"pr was moved to another base-branch queue",
+			"moved pr to another base branch queue",
 			logfields.Reason("base_branch_changed"),
 			zap.String("git.old_base_branch", oldBaseBranch.Branch),
 			logfields.BaseBranch(bb.Branch),
@@ -617,10 +587,23 @@ func (a *Autoupdater) processPullRequestEvent(ctx context.Context, logger *zap.L
 	}
 }
 
-func (a *Autoupdater) processPushEvent(ctx context.Context, logger *zap.Logger, ev *github.PushEvent) {
-	// The changed branch could be a base-branch for other
-	// PRs or a branch that is queued for autoupdates
-	// itself.
+// logError logs an error with the given message and fields.
+// If the error is of type ErrNotFound or ErrAlreadyExists the message is
+// logged with Info priority, otherwise with Error priority.
+func logError(logger *zap.Logger, msg string, err error, fields ...zapcore.Field) {
+	fields = append([]zapcore.Field{zap.Error(err)}, fields...)
+
+	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrAlreadyExists) {
+		logger.Info(msg, fields...)
+		return
+	}
+
+	logger.Error(msg, fields...)
+}
+
+func (a *Coordinator) processPushEvent(ctx context.Context, logger *zap.Logger, ev *github.PushEvent) {
+	// The changed branch can be a base-branch for other
+	// PRs or a PR branch
 	branch := branchRefToRef(ev.GetRef())
 	owner := ev.GetRepo().GetOwner().GetLogin()
 	repo := ev.GetRepo().GetName()
@@ -656,7 +639,7 @@ func (a *Autoupdater) processPushEvent(ctx context.Context, logger *zap.Logger, 
 		return
 	}
 
-	q.ScheduleUpdate(ctx, TaskTriggerCI)
+	q.ScheduleProcessPR(ctx, TaskTriggerCI)
 
 	for bbID, q := range a.queues {
 		if bbID == bb.BranchID {
@@ -665,7 +648,7 @@ func (a *Autoupdater) processPushEvent(ctx context.Context, logger *zap.Logger, 
 	}
 }
 
-func (a *Autoupdater) processPullRequestReviewEvent(ctx context.Context, logger *zap.Logger, ev *github.PullRequestReviewEvent) {
+func (a *Coordinator) processPullRequestReviewEvent(ctx context.Context, logger *zap.Logger, ev *github.PullRequestReviewEvent) {
 	owner := ev.GetRepo().GetOwner().GetLogin()
 	repo := ev.GetRepo().GetName()
 	prNumber := ev.GetPullRequest().GetNumber()
@@ -709,7 +692,7 @@ func (a *Autoupdater) processPullRequestReviewEvent(ctx context.Context, logger 
 			return
 		}
 
-		_, err = a.TriggerUpdateIfFirst(ctx, bb, &PRNumber{Number: prNumber}, TaskNone)
+		_, err = a.TriggerProcessPRIfFirst(ctx, bb, &PRNumber{Number: prNumber}, TaskNone)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				return
@@ -746,7 +729,7 @@ func prBranches(prs []*github.PullRequest) []string {
 	return res
 }
 
-func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logger, ev *github.CheckRunEvent) {
+func (a *Coordinator) processCheckRunEvent(ctx context.Context, logger *zap.Logger, ev *github.CheckRunEvent) {
 	checkRun := ev.GetCheckRun()
 	branches := prBranches(checkRun.PullRequests)
 	owner := ev.GetRepo().GetOwner().GetLogin()
@@ -763,7 +746,7 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 	logger.Debug("event received")
 
 	if len(branches) == 0 {
-		logger.Info("ignoring event, pull request or branches fields are empty")
+		logger.Info("ignoring event, pull request or branches fields is empty")
 
 		return
 	}
@@ -803,10 +786,10 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 	switch checkRun.GetConclusion() {
 	case "cancelled", "failure", "timed_out", "action_required":
 		for _, branch := range branches {
-			pr, err := a.TriggerUpdateIfFirstAllQueues(ctx, owner, repo, &PRBranch{BranchName: branch})
+			pr, err := a.TriggerProcessPRIfFirstAllQueues(ctx, owner, repo, &PRBranch{BranchName: branch})
 			if err != nil {
 				if errors.Is(err, ErrNotFound) {
-					logger.Debug("processed checkRun event for branch that is not queued for updates")
+					logger.Debug("ignoring checkRun event for branch that is not in merge queue")
 				} else {
 					logger.Error("triggering update failed", zap.Error(err))
 				}
@@ -815,7 +798,7 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 			}
 
 			logger.With(pr.LogFields...).Info(
-				"update triggered, negative check run conclusion received",
+				"processPR triggered, negative check run conclusion received",
 				logfields.Reason("check_run_result_negative"),
 			)
 		}
@@ -828,7 +811,7 @@ func (a *Autoupdater) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 	}
 }
 
-func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger, ev *github.StatusEvent) {
+func (a *Coordinator) processStatusEvent(ctx context.Context, logger *zap.Logger, ev *github.StatusEvent) {
 	branches := ghBranchesAsStrings(ev.Branches)
 	owner := ev.GetRepo().GetOwner().GetLogin()
 	repo := ev.GetRepo().GetName()
@@ -843,7 +826,7 @@ func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger
 	logger.Debug("event received")
 
 	if len(branches) == 0 {
-		logger.Info("ignorning event, pull request or branches fields are empty")
+		logger.Info("ignorning event, pull request or branches field is empty")
 
 		return
 	}
@@ -859,19 +842,19 @@ func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger
 	switch ev.GetState() {
 	case "error", "failure":
 		for _, branch := range branches {
-			pr, err := a.TriggerUpdateIfFirstAllQueues(ctx, owner, repo, &PRBranch{BranchName: branch})
+			pr, err := a.TriggerProcessPRIfFirstAllQueues(ctx, owner, repo, &PRBranch{BranchName: branch})
 			if err != nil {
 				if errors.Is(err, ErrNotFound) {
 					logger.Debug("processed status event for branch that is not queued for updates")
 				} else {
-					logger.Error("triggering  update failed", zap.Error(err))
+					logger.Error("triggering processPR failed", zap.Error(err))
 				}
 
 				continue
 			}
 
 			logger.With(pr.LogFields...).Info(
-				"update triggered, negative status check event received",
+				"processPR triggered, negative status check event received",
 				logfields.Reason("status_check_negative"),
 			)
 		}
@@ -884,12 +867,14 @@ func (a *Autoupdater) processStatusEvent(ctx context.Context, logger *zap.Logger
 	}
 }
 
-// Enqueue appends the pull request to the autoupdate queue for baseBranch.
-// When it becomes the first element in the queue, it will be kept uptodate with it's baseBranch.
-// If the pr is already enqueued a ErrAlreadyExists error is returned.
-//
+// Enqueue adds the pull request to the mergequeue of baseBranch.
+// When it becomes the first element in the queue and it has no negative
+// merge-requirements, it will be processed. This means CI jobs will be
+// triggered, it is kept up to date with it's base branch, it is labeled and a
+// commit status is submitted.
+// If the pr is already enqueued an ErrAlreadyExists error is returned.
 // If no queue for the baseBranch exist, it will be created.
-func (a *Autoupdater) Enqueue(_ context.Context, baseBranch *BaseBranch, pr *PullRequest) error {
+func (a *Coordinator) Enqueue(_ context.Context, baseBranch *BaseBranch, pr *PullRequest) error {
 	var q *queue
 	var exist bool
 
@@ -922,11 +907,12 @@ func (a *Autoupdater) Enqueue(_ context.Context, baseBranch *BaseBranch, pr *Pul
 	return nil
 }
 
-// Dequeue removes the pull request with number prNumber from the autoupdate queue of baseBranch.
-// If no pull request is queued with prNumber an ErrNotFound error is returned.
-//
-// If the pull request was the only element in the baseBranch queue, the queue is removed.
-func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumber int, setPendingStatusState bool) (*PullRequest, error) {
+// Dequeue removes the pull request with number prNumber from the queue of
+// baseBranch. If no pull request is queued with prNumber an ErrNotFound error
+// is returned.
+// If the pull request is the only element in the baseBranch queue, the queue
+// is removed.
+func (a *Coordinator) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumber int, setPendingStatusState bool) (*PullRequest, error) {
 	var q *queue
 	var exist bool
 
@@ -940,7 +926,7 @@ func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 
 	pr, err := q.Dequeue(prNumber, setPendingStatusState)
 	if err != nil {
-		return nil, fmt.Errorf("disabling updates for pr failed: %w", err)
+		return nil, fmt.Errorf("removing pr from merge queue failed: %w", err)
 	}
 
 	metrics.DequeueOpsInc(&baseBranch.BranchID)
@@ -951,7 +937,7 @@ func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 
 		logger := a.Logger.With(pr.LogFields...).With(baseBranch.Logfields...)
 
-		logger.Debug("empty queue for base branch removed")
+		logger.Debug("removed empty queue for base branch")
 	}
 
 	return pr, nil
@@ -962,7 +948,7 @@ func (a *Autoupdater) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 // staleSince timestamp.
 // The method returns a list of branch names for that no queued PR could be
 // found.
-func (a *Autoupdater) SetPRStaleSinceIfNewerByBranch(
+func (a *Coordinator) SetPRStaleSinceIfNewerByBranch(
 	_ context.Context,
 	owner, repo string,
 	branchNames []string,
@@ -986,7 +972,7 @@ func (a *Autoupdater) SetPRStaleSinceIfNewerByBranch(
 // SetPRStaleSinceIfNewer sets the staleSince timestamp of the PR to updatedAt,
 // if it is newer then the current staleSince timestamp.
 // If the PR is not queued for autoupdates, ErrNotFound is returned.
-func (a *Autoupdater) SetPRStaleSinceIfNewer(
+func (a *Coordinator) SetPRStaleSinceIfNewer(
 	_ context.Context,
 	baseBranch *BaseBranch,
 	prNumber int,
@@ -1003,9 +989,9 @@ func (a *Autoupdater) SetPRStaleSinceIfNewer(
 	return q.SetPRStaleSinceIfNewer(prNumber, updatedAt)
 }
 
-// ResumeIfStatusPositive calls ScheduleResumePRIfStatusPositive for all queued
-// PRs of the passed branchNames.
-func (a *Autoupdater) ResumeIfStatusPositive(ctx context.Context, owner, repo string, branchNames []string) {
+// ResumeIfStatusPositive schedules processPR for all PRs of branchNames that
+// have a positive ready-to-merge status.
+func (a *Coordinator) ResumeIfStatusPositive(ctx context.Context, owner, repo string, branchNames []string) {
 	a.queuesLock.Lock()
 	defer a.queuesLock.Unlock()
 
@@ -1016,15 +1002,14 @@ func (a *Autoupdater) ResumeIfStatusPositive(ctx context.Context, owner, repo st
 
 		prs := q.SuspendedPRsbyBranch(branchNames)
 		for _, pr := range prs {
-			q.ScheduleResumePRIfStatusPositive(ctx, pr)
+			q.ScheduleProcessPRIfStatusPositive(ctx, pr)
 		}
 	}
 }
 
-// Resume resumes updates for a pull request.
-// If the pull request is not queued for updates and in suspended state
-// ErrNotFound is returned.
-func (a *Autoupdater) Resume(_ context.Context, baseBranch *BaseBranch, prNumber int) error {
+// Resume moves a pull request from the suspend queue to the active queue.
+// If the pull request is not queued for updates ErrNotFound is returned.
+func (a *Coordinator) Resume(_ context.Context, baseBranch *BaseBranch, prNumber int) error {
 	a.queuesLock.Lock()
 	defer a.queuesLock.Unlock()
 
@@ -1036,9 +1021,9 @@ func (a *Autoupdater) Resume(_ context.Context, baseBranch *BaseBranch, prNumber
 	return q.ResumePR(prNumber)
 }
 
-// ChangeBaseBranch dequeues a Pull Request from the queue oldBaseBranch and
-// enqueues it at the queue for newBaseBranch.
-func (a *Autoupdater) ChangeBaseBranch(
+// ChangeBaseBranch moves a pull request from the oldBaseBranch queue to the
+// one for newBaseBranch.
+func (a *Coordinator) ChangeBaseBranch(
 	ctx context.Context,
 	oldBaseBranch, newBaseBranch *BaseBranch,
 	prNumber int,
@@ -1055,11 +1040,11 @@ func (a *Autoupdater) ChangeBaseBranch(
 	return nil
 }
 
-// TriggerUpdateIfFirst schedules the update operation for the first pull
+// TriggerProcessPRIfFirst schedules the processPR operation for the first pull
 // request in the queue if it matches prSpec.
-// If an update was triggered, the PullRequest is returned.
-// If the first PR does not match prSpec, ErrNotFound is returned.
-func (a *Autoupdater) TriggerUpdateIfFirst(
+// If an update was triggered, the PullRequest is returned. If the first PR
+// does not match prSpec, ErrNotFound is returned.
+func (a *Coordinator) TriggerProcessPRIfFirst(
 	ctx context.Context,
 	baseBranch *BaseBranch,
 	prSpec PRSpecifier,
@@ -1073,10 +1058,10 @@ func (a *Autoupdater) TriggerUpdateIfFirst(
 		return nil, ErrNotFound
 	}
 
-	return a._triggerUpdateIfFirst(ctx, q, prSpec, task)
+	return a._triggerProcessPRIfFirst(ctx, q, prSpec, task)
 }
 
-func (a *Autoupdater) _triggerUpdateIfFirst(
+func (a *Coordinator) _triggerProcessPRIfFirst(
 	ctx context.Context,
 	q *queue,
 	prSpec PRSpecifier,
@@ -1096,13 +1081,13 @@ func (a *Autoupdater) _triggerUpdateIfFirst(
 	switch v := prSpec.(type) {
 	case *PRNumber:
 		if first.Number == v.Number {
-			q.ScheduleUpdate(ctx, task)
+			q.ScheduleProcessPR(ctx, task)
 			return first, nil
 		}
 
 	case *PRBranch:
 		if first.Branch == v.BranchName {
-			q.ScheduleUpdate(ctx, task)
+			q.ScheduleProcessPR(ctx, task)
 			return first, nil
 		}
 
@@ -1114,10 +1099,10 @@ func (a *Autoupdater) _triggerUpdateIfFirst(
 	return nil, ErrNotFound
 }
 
-// TriggerUpdateIfFirstAllQueues does the same then
+// TriggerProcessPRIfFirstAllQueues does the same then
 // _triggerUpdateIfFirst but does not require to specify the base
 // branch name.
-func (a *Autoupdater) TriggerUpdateIfFirstAllQueues(
+func (a *Coordinator) TriggerProcessPRIfFirstAllQueues(
 	ctx context.Context,
 	repoOwner string,
 	repo string,
@@ -1131,7 +1116,7 @@ func (a *Autoupdater) TriggerUpdateIfFirstAllQueues(
 			continue
 		}
 
-		pr, err := a._triggerUpdateIfFirst(ctx, q, prSpec, TaskNone)
+		pr, err := a._triggerProcessPRIfFirst(ctx, q, prSpec, TaskNone)
 		if err == nil {
 			return pr, nil
 		}
@@ -1145,42 +1130,7 @@ func (a *Autoupdater) TriggerUpdateIfFirstAllQueues(
 	return nil, ErrNotFound
 }
 
-// Start starts the event loop in a go-routine.
-// The event loop reads events from the eventChan and processes them.
-func (a *Autoupdater) Start() {
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		a.eventLoop()
-	}()
-}
-
-// Stop stops the event loop and waits until it terminates.
-// All queues will be deleted, operations that are in progress will be canceled.
-func (a *Autoupdater) Stop() {
-	a.Logger.Debug("autoupdater terminating")
-
-	select {
-	case <-a.shutdownChan: // already closed
-	default:
-		close(a.shutdownChan)
-	}
-
-	a.Logger.Debug("waiting for event loop to terminate")
-	a.wg.Wait()
-
-	a.queuesLock.Lock()
-	defer a.queuesLock.Unlock()
-
-	for branchID, q := range a.queues {
-		q.Stop()
-		delete(a.queues, branchID)
-	}
-
-	a.Logger.Debug("autoupdater terminated")
-}
-
-func (a *Autoupdater) SetPullRequestPriorities(priorities *PRPriorityUpdates) {
+func (a *Coordinator) SetPullRequestPriorities(priorities *PRPriorityUpdates) {
 	a.queuesLock.Lock()
 	defer a.queuesLock.Unlock()
 	q, exists := a.queues[priorities.BranchID]
@@ -1201,14 +1151,16 @@ func (a *Autoupdater) SetPullRequestPriorities(priorities *PRPriorityUpdates) {
 	}
 }
 
-func (a *Autoupdater) getQueue(branchID *BranchID) *queue {
+func (a *Coordinator) getQueue(branchID *BranchID) *queue {
 	a.queuesLock.Lock()
 	defer a.queuesLock.Unlock()
 	return a.queues[*branchID]
 }
 
-func (a *Autoupdater) PauseQueue(branchID *BranchID) {
-	q := a.getQueue(branchID)
+// PauseQueue pauses the merge queue.
+// Pull request can still be added and removed from the queue but the processPR operation will not run.
+func (a *Coordinator) PauseQueue(baseBranch *BranchID) {
+	q := a.getQueue(baseBranch)
 	if q == nil {
 		return
 	}
@@ -1216,11 +1168,29 @@ func (a *Autoupdater) PauseQueue(branchID *BranchID) {
 	q.Pause()
 }
 
-func (a *Autoupdater) ResumeQueue(branchID *BranchID) {
-	q := a.getQueue(branchID)
+// Resumes the merge queue.
+// Events will be processed again, the processPR operation is run for the first
+// PR in the queue.
+func (a *Coordinator) ResumeQueue(baseBranch *BranchID) {
+	q := a.getQueue(baseBranch)
 	if q == nil {
 		return
 	}
 
 	q.Resume(context.Background())
+}
+
+// branchRefToRef returns ref without a leading refs/heads/ prefix.
+func branchRefToRef(ref string) string {
+	return strings.TrimPrefix(ref, "refs/heads/")
+}
+
+func ghBranchesAsStrings(branches []*github.Branch) []string {
+	result := make([]string, 0, len(branches))
+
+	for _, branch := range branches {
+		result = append(result, branch.GetName())
+	}
+
+	return result
 }

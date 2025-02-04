@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 type Task uint8
 

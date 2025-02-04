@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"errors"
