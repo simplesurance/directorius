@@ -3,57 +3,68 @@ http_server_listen_addr = ":8085"
 #https_ssl_cert_file = ""
 #https_ssl_key_file = ""
 
-# the local http and https endpoints that receives github webhook events
+# endpoint that receives GitHub webhook events
 github_webhook_endpoint = "/listener/github"
+# must matcht the webhook configuration in GitHub
 github_webhook_secret = ""
 
-# expose Prometheus metrics at the specified endpoint
 # prometheus_metrics_endpoint = "/metrics"
 
-# GitHub API token, required when github actions are defined or autoupdate is
-# enabled.
+# required for adding/removing PR labels and submit commit statuses
 github_api_token = "my-secret-token"
 
-# Supported log formats: logfmt, console, json
+# supported log formats: logfmt, console, json
 log_format = "logfmt"
 
-# The key that is used for logging the timestamp. If empty, timestamps will not
-# be included in log messages.
+# key used by the logger for the timestamp, an empty value omits the timestamp
+# from logs
 log_time_key = "time_iso8601"
 
-# log_level controls the priority threshold for log messages.
-# All messages with the specified or a higher priority are logged.
+# All log messages with the specified or a higher priority are logged.
 # Supported values: debug, info, warn, error, panic, fatal
 log_level =  "info"
 
-# local http server endpoint under which a minimal webinterface is served
+# local http server endpoint that serves the web interface
 webinterface_endpoint = "/"
 
-# enqueue/dequeue a pull request for autoupdates when one of the labels is added/removed
+# enqueue/dequeue a pull request when a PR has this label
 trigger_labels = ["queue-add"]
 # enqueue/dequeue a pull request for autoupdates when auto-merge is enabled
 # (https://docs.github.com/en/github/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)
 trigger_on_auto_merge = true
-# queue_pr_head_label is the name of the GitHub label that is applied to the pull
-# request that is the first in the autoupdate queue
-queue_pr_head_label = "autoupdater-first"
+# this label is added to the PR when it becomes first in the queue
+queue_pr_head_label = "#1 in merge queue"
 
 [[repository]]
-  # the GitHub login name of the subject owning the repository
   owner = "simplesurance"
   repository = "goordinator"
 
+# This sections allows to configure Jenkins Jobs that are triggered when a pull
+# request becomes the first in the queue.
 [ci]
   server_url = "https://jenkins"
   basic_auth.user = "cetautomatix"
   basic_auth.password = "hammer"
 
   [[ci.job]]
+    # URL to the Jenkins job relative to server_url.
+    # The following Go template variables are supported:
+    # - {{ .Branch }}
+    # - {{ .PullRequestNumber }}
+    # The following Go template functions are supported:
+    # - {{ queryescape }}
+    #   Escapes a string so it can be safely used as query component in a URL
+    # - {{ pathescape }}
+    #   Escapes a string so it can be safely used as path segment in a URL
     url_path = "job/check/{{ queryescape .Branch }}"
+    # Is the name of the GitHub commit status or check that the Job uses to
+    # report the execution status.
+    # Setting it allows to only trigger Jenkins Job that aren't already running
+    # for a commit.
     github_context = "check"
 
   [[ci.job]]
-    url_path = "job/build/{{ queryescape .PullRequestNr }}"
+    url_path = "job/build/{{ queryescape .PullRequestNumber }}"
     github_context = "build"
 
   [[ci.job]]
@@ -63,4 +74,3 @@ queue_pr_head_label = "autoupdater-first"
     [ci.job.parameters]
       branch = "{{ .Branch }}"
       pr_nr = "{{ .PullRequestNr }}"
-
