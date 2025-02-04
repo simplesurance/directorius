@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"context"
@@ -17,28 +17,38 @@ const loggerName = "autoupdater"
 type Config struct {
 	Logger *zap.Logger
 
-	GitHubClient          GithubClient
-	CI                    *CI
-	EventChan             <-chan *github_prov.Event
-	Retryer               *retry.Retryer
+	GitHubClient GithubClient
+	// CI configures Jenkins Job for that builds are scheduled.
+	CI *CI
+	// EventChan is a channel from that Github webhook events are received
+	EventChan <-chan *github_prov.Event
+	Retryer   *retry.Retryer
+	// MonitoredRepositories defines the GitHub repositories for that merge
+	// queues are created.
 	MonitoredRepositories map[Repository]struct{}
-	TriggerOnAutomerge    bool
-	TriggerLabels         set.Set[string]
-	HeadLabel             string
-	// When DryRun is enabled all GitHub API operation that could result in
-	// a change will be simulated and always succeed.
+	// TriggerOnAutomerge enables adding a pull request to the merge queue
+	// when automerge in GitHub is enabled
+	TriggerOnAutomerge bool
+	// TriggerLabels is a set of GitHub labels that when addded to a PR,
+	// cause that the PR is enqueued
+	TriggerLabels set.Set[string]
+	// HeadLabel is the name of a GitHub label that is added/remove to the
+	// first pull request in the mergequeue.
+	HeadLabel string
+	// DryRun can be enabled to simulate GitHub API and Jenkins Client
+	// operations that would result in a change.
 	DryRun bool
 }
 
-type CIClient interface {
+type JenkinsClient interface {
 	fmt.Stringer
 	Build(context.Context, *jenkins.Job) (int64, error)
 	GetBuildFromQueueItemID(context.Context, int64) (*jenkins.Build, error)
 }
 
 type CI struct {
-	Client CIClient
-	// Jobs is map of github-status-context -> JobTemplate.
+	Client JenkinsClient
+	// Jobs is a map of github-status-context -> JobTemplate.
 	Jobs map[string]*jenkins.JobTemplate
 
 	retryer *retry.Retryer

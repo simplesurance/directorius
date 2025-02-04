@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"fmt"
@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/simplesurance/directorius/internal/autoupdater/pages/types"
+	"github.com/simplesurance/directorius/internal/mergequeue/pages/types"
 )
 
-func (a *Autoupdater) httpListData() *types.ListData {
+func (a *Coordinator) httpListData() *types.ListData {
 	result := types.ListData{
 		CreatedAt:             time.Now(),
 		PriorityChangePostURL: handlerPriorityUpdatePath,

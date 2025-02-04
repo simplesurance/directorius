@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"context"
@@ -7,15 +7,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/jenkins"
+	"github.com/simplesurance/directorius/internal/mergequeue/mocks"
 	"github.com/simplesurance/directorius/internal/retry"
 )
 
 func TestCIRun_IgnoresJobsWithUnknownContext(t *testing.T) {
 	l := forwardLogsToTestLogger(t)
 	mockctrl := gomock.NewController(t, gomock.WithOverridableExpectations())
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	ciClient.
 		EXPECT().

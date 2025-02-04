@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"context"
@@ -30,7 +30,7 @@ const (
 // If it meets a condition for not being automatically updated, it is dequeued.
 // If a PR has the [a.HeadLabel] it is removed, if it has a non-pending github
 // status from directorius it is set to pending.
-func (a *Autoupdater) InitSync(ctx context.Context) error {
+func (a *Coordinator) InitSync(ctx context.Context) error {
 	for repo := range a.MonitoredRepositories {
 		err := a.sync(ctx, repo.OwnerLogin, repo.RepositoryName)
 		if err != nil {
@@ -41,7 +41,7 @@ func (a *Autoupdater) InitSync(ctx context.Context) error {
 	return nil
 }
 
-func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
+func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 	fields := []zap.Field{logfields.Repository(repo), logfields.RepositoryOwner(owner)}
 	logger := a.Logger.With(fields...)
 
@@ -143,7 +143,7 @@ func (a *Autoupdater) sync(ctx context.Context, owner, repo string) error {
 	return nil
 }
 
-func (a *Autoupdater) enqueuePR(ctx context.Context, repoOwner, repo, baseBranch string, pr *PullRequest) error {
+func (a *Coordinator) enqueuePR(ctx context.Context, repoOwner, repo, baseBranch string, pr *PullRequest) error {
 	bb, err := NewBaseBranch(repoOwner, repo, baseBranch)
 	if err != nil {
 		return fmt.Errorf("incomplete base branch information: %w", err)
@@ -152,7 +152,7 @@ func (a *Autoupdater) enqueuePR(ctx context.Context, repoOwner, repo, baseBranch
 	return a.Enqueue(ctx, bb, pr)
 }
 
-func (a *Autoupdater) removeLabel(ctx context.Context, repoOwner, repo string, pr *PullRequest) error {
+func (a *Coordinator) removeLabel(ctx context.Context, repoOwner, repo string, pr *PullRequest) error {
 	return a.Retryer.Run(ctx, func(ctx context.Context) error {
 		return a.GitHubClient.RemoveLabel(ctx,
 			repoOwner, repo, pr.Number,
@@ -161,7 +161,7 @@ func (a *Autoupdater) removeLabel(ctx context.Context, repoOwner, repo string, p
 	}, logfields.NewWith(pr.LogFields, logfields.Operation("github_remove_label")))
 }
 
-func (a *Autoupdater) evaluateActions(pr *githubclt.PR) []syncAction {
+func (a *Coordinator) evaluateActions(pr *githubclt.PR) []syncAction {
 	var result []syncAction
 
 	for _, label := range pr.Labels {

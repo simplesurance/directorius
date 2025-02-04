@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"context"
@@ -9,9 +9,9 @@ import (
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 
-	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
 	"github.com/simplesurance/directorius/internal/jenkins"
+	"github.com/simplesurance/directorius/internal/mergequeue/mocks"
 	"github.com/simplesurance/directorius/internal/retry"
 )
 
@@ -27,7 +27,7 @@ func initEvalPRActionTest(t *testing.T) *evalPRTest {
 
 	mockctrl := gomock.NewController(t, gomock.WithOverridableExpectations())
 	ghClient := mocks.NewMockGithubClient(mockctrl)
-	ciClient := mocks.NewMockCIClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
 
 	mockSuccessfulGithubUpdateBranchCallAnyPR(ghClient, false).AnyTimes()
 	mockReadyForMergeStatus(

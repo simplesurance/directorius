@@ -8,9 +8,9 @@ build:
 .PHONY: gen_mocks
 gen_mocks:
 	$(info * generating mock code)
-	mockgen -package mocks -source internal/autoupdater/autoupdate.go -destination internal/autoupdater/mocks/autoupdate.go
+	mockgen -package mocks -source internal/mergequeue/coordinator.go -destination internal/mergequeue/mocks/autoupdate.go
 	mockgen -package mocks -source internal/githubclt/client.go -destination internal/githubclt/mocks/githubclient.go
-	mockgen -package mocks -destination internal/autoupdater/mocks/ciclient.go github.com/simplesurance/directorius/internal/autoupdater CIClient
+	mockgen -package mocks -destination internal/mergequeue/mocks/jenkinsclient.go github.com/simplesurance/directorius/internal/mergequeue JenkinsClient
 
 .PHONY: check
 check:

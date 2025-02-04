@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"context"
@@ -11,8 +11,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 
-	"github.com/simplesurance/directorius/internal/autoupdater/mocks"
 	"github.com/simplesurance/directorius/internal/githubclt"
+	"github.com/simplesurance/directorius/internal/mergequeue/mocks"
 	"github.com/simplesurance/directorius/internal/retry"
 )
 

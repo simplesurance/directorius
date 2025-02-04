@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// Run starts builds of all [c.Jobs] for pr for that a ciContext is passed.
-// [pr.LastStartedCIBuilds] is overwritten with the URLs of all started builds.
+// Run starts a build for CI jobs that have as context ciContext.
+// [pr.LastStartedCIBuilds] is overwritten with the URLs of the started builds.
 func (c *CI) Run(ctx context.Context, pr *PullRequest, ciContext ...string) error {
 	var errs []error
 
@@ -59,7 +59,7 @@ type runCiResult struct {
 	Build *jenkins.Build
 }
 
-// runCIJobToCh runs [CI.runCIJob] and sends the result to resultCh
+// runCIJobToCh calls [CI.runCIJob] and sends the result to resultCh
 func (c *CI) runCIJobToCh(ctx context.Context, resultCh chan<- *runCiResult, retryer *retry.Retryer, pr *PullRequest, jobTempl *jenkins.JobTemplate) {
 	build, err := c.runCIJob(ctx, retryer, pr, jobTempl)
 	if err != nil {

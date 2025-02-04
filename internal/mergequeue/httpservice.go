@@ -1,4 +1,4 @@
-package autoupdater
+package mergequeue
 
 import (
 	"embed"
@@ -12,8 +12,8 @@ import (
 
 	_ "embed" // used to embed html templates and static docs
 
-	"github.com/simplesurance/directorius/internal/autoupdater/pages/types"
 	"github.com/simplesurance/directorius/internal/logfields"
+	"github.com/simplesurance/directorius/internal/mergequeue/pages/types"
 
 	"go.uber.org/zap"
 )
@@ -45,13 +45,13 @@ const (
 )
 
 type HTTPService struct {
-	autoupdater *Autoupdater
+	autoupdater *Coordinator
 	templates   *template.Template
 	logger      *zap.Logger
 	basepath    string
 }
 
-func NewHTTPService(autoupdater *Autoupdater, endpoint string) *HTTPService {
+func NewHTTPService(autoupdater *Coordinator, endpoint string) *HTTPService {
 	return &HTTPService{
 		autoupdater: autoupdater,
 		templates: template.Must(
