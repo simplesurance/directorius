@@ -101,7 +101,7 @@ func (clt *Client) ListPRs(ctx context.Context, owner, repo string) iter.Seq2[*P
 			var q listPRsQuery
 			err := clt.graphQLClt.Query(ctx, &q, vars)
 			if err != nil {
-				if !yield(nil, clt.wrapRetryableErrors(err)) {
+				if !yield(nil, clt.wrapGraphQLRetryableErrors(err)) {
 					return
 				}
 				continue
