@@ -16,7 +16,7 @@ var ErrPullRequestIsClosed = errors.New("pull request is closed")
 
 var graphQlHTTPStatusErrRe = regexp.MustCompile(`^non-200 OK status code: ([0-9]+) .*`)
 
-func (clt *Client) wrapRetryableErrors(err error) error {
+func (clt *Client) wrapRESTRetryableErrors(err error) error {
 	switch v := err.(type) { // nolint:errorlint // errors.As not needed here
 	case *github.RateLimitError:
 		clt.logger.Info(

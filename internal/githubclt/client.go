@@ -71,7 +71,7 @@ type Client struct {
 func (clt *Client) BranchIsBehindBase(ctx context.Context, owner, repo, base, head string) (behind bool, err error) {
 	cmp, _, err := clt.restClt.Repositories.CompareCommits(ctx, owner, repo, base, head, &github.ListOptions{PerPage: 1})
 	if err != nil {
-		return false, clt.wrapRetryableErrors(err)
+		return false, clt.wrapRESTRetryableErrors(err)
 	}
 
 	if cmp.BehindBy == nil {
@@ -89,7 +89,7 @@ func (clt *Client) BranchIsBehindBase(ctx context.Context, owner, repo, base, he
 func (clt *Client) PRIsUptodate(ctx context.Context, owner, repo string, pullRequestNumber int) (isUptodate bool, headSHA string, err error) {
 	pr, _, err := clt.restClt.PullRequests.Get(ctx, owner, repo, pullRequestNumber)
 	if err != nil {
-		return false, "", clt.wrapRetryableErrors(err)
+		return false, "", clt.wrapRESTRetryableErrors(err)
 	}
 
 	if pr.GetState() == "closed" {
@@ -136,7 +136,7 @@ func (clt *Client) PRIsUptodate(ctx context.Context, owner, repo string, pullReq
 // CreateIssueComment creates a comment in a issue or pull request
 func (clt *Client) CreateIssueComment(ctx context.Context, owner, repo string, issueOrPRNr int, comment string) error {
 	_, _, err := clt.restClt.Issues.CreateComment(ctx, owner, repo, issueOrPRNr, &github.IssueComment{Body: &comment})
-	return clt.wrapRetryableErrors(err)
+	return clt.wrapRESTRetryableErrors(err)
 }
 
 type UpdateBranchResult struct {
@@ -204,7 +204,7 @@ func (clt *Client) UpdateBranch(ctx context.Context, owner, repo string, pullReq
 			}
 		}
 
-		return nil, clt.wrapRetryableErrors(err)
+		return nil, clt.wrapRESTRetryableErrors(err)
 	}
 
 	logger.Debug("branch was updated with base branch")
@@ -222,7 +222,7 @@ func (clt *Client) AddLabel(ctx context.Context, owner, repo string, pullRequest
 		return errors.New("provided label is empty")
 	}
 	_, _, err := clt.restClt.Issues.AddLabelsToIssue(ctx, owner, repo, pullRequestOrIssueNumber, []string{label})
-	return clt.wrapRetryableErrors(err)
+	return clt.wrapRESTRetryableErrors(err)
 }
 
 // RemoveLabel removes a label from a Pull-Request or issue.
@@ -268,7 +268,7 @@ func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit s
 		Description: &description,
 		Context:     &context,
 	})
-	return clt.wrapRetryableErrors(err)
+	return clt.wrapRESTRetryableErrors(err)
 }
 
 // CreateCommitStatus submits a status for the HEAD commit of a pull request branch.
@@ -276,7 +276,7 @@ func (clt *Client) CreateCommitStatus(ctx context.Context, owner, repo, commit s
 func (clt *Client) CreateHeadCommitStatus(ctx context.Context, owner, repo string, pullRequestNumber int, state StatusState, description, context string) error {
 	pr, _, err := clt.restClt.PullRequests.Get(ctx, owner, repo, pullRequestNumber)
 	if err != nil {
-		return clt.wrapRetryableErrors(err)
+		return clt.wrapRESTRetryableErrors(err)
 	}
 
 	prHead := pr.GetHead()
