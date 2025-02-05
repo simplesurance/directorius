@@ -58,5 +58,6 @@ GitHub Repository Settings:
 
 
 --
+
 Directorius has been forked from the autoupdater component of
 [goordinator](https://github.com/simplesurance/goordinator/) version 0.14.0.
