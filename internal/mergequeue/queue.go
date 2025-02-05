@@ -226,7 +226,7 @@ func (q *queue) _enqueueActive(pr *PullRequest) error {
 }
 
 // SortActiveQueue sorts the PRs in the active queue by the [orderBefore]
-// criterias.
+// criteria.
 //
 // The first element in the active queue is static and not reordered.
 // Reordering it would mean that CI jobs most likely would need to rerun from
