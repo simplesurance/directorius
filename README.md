@@ -6,11 +6,11 @@ rules and can work together with Jenkins.
 
 Pull requests are queued and processed in order.
 When a PR is not approved, or has a required failed CI run it is moved to the
-__suspend queue__.
+*suspend queue*.
 When it's branch or it's base branch is updated, it is getting approved or the
-status of a required failed CI check becomes positive it is moved to the __activ
-e queue__.
-The status of the first PR in the __active queue__ is monitored, Jenkins CI Jobs
+status of a required failed CI check becomes positive it is moved to the *activ
+e queue*.
+The status of the first PR in the *active queue* is monitored, Jenkins CI Jobs
 are triggered for it, it is being kept up to date with its base branch, it is
 labeled and a positive commit status is reported for it.
 When all configured GitHub merge requirements are fulfilled, it is merged by
@@ -35,8 +35,27 @@ GitHub.
   - pause the merge queue
 
 ## Configuration
+
 A documented example configuration file can be found in the repository:
 [config.example.toml](config.example.toml).
+
+## Typical GitHub Setup for Directorius
+
+GitHub Repository Settings:
+
+- Branch protection rules:
+  - Require a pull request before merging
+  - Require approvals
+  - Require status checks to pass before merging
+    - require: directorius commit status
+    - require: all other CI jobs that must succeed
+  - Require branches to be up to date before merging
+  - **Disable**: Require merge queue
+- General:
+  - **Enable**: Allow auto-merge
+    (Directorius does not merge PRs, it relies on GitHub to do it when all
+    prerequisites are fulfilled)
+
 
 --
 Directorius has been forked from the autoupdater component of
