@@ -1,45 +1,38 @@
 # Directorius
 
-Directorius implements a merge queue for GitHub pull requests (PR).
+Directorius provides a merge queue for GitHub pull requests (PR).
 It relies on GitHub webhook events, its REST and graphQL API, branch protection
 rules and can work together with Jenkins.
 
-Pull requests are queued and processed in order.
-When a PR is not approved, or has a required failed CI run it is moved to the
-*suspend queue*.
-When it's branch or it's base branch is updated, it is getting approved or the
-status of a required failed CI check becomes positive it is moved to the *activ
-e queue*.
-The status of the first PR in the *active queue* is monitored, Jenkins CI Jobs
-are triggered for it, it is being kept up to date with its base branch, it is
-labeled and a positive commit status is reported for it.
-When all configured GitHub merge requirements are fulfilled, it is merged by
-GitHub.
+A pull request enters the queue when auto-merge is enabled or a
+configurable label is added to it.
+Directorius maintains 2 states for PRs:
 
-To enforce that only the PR that is first in the queue is merged, the
-commit status submitted by directorius can be configured as merge requirement in
-GitHub.
+- an ordered active queue for PRs that are ready to be processed
+- an unordered suspend queue for PRs that do not meet the merge requirements
+  configured on GitHub.
 
-## Features
+For the first PR in the active queue, Directorius:
 
-- Adds PRs to the queue when auto-merge is enabled or a PR label is added
-- Automatically updates the first PR in the queue with changes in its base
-  branch
-- Supports different queues per repository and base branch
-- Triggers Jenkins Jobs that report their status to GitHub and aren't running
-- Ignores reports of CI Job results from older obsolete Jenkins builds
-- Submits a GitHub Status and labels a PR when it is first in the merge queue
-- Has a web interface to:
-  - view queued PRs and their status
-  - prioritize PRs,
-  - pause the merge queue
+- schedules builds of Jenkins CI jobs
+- syncs the PR branch with changes in it's base branch
+- marks it with a queue head label
+- reports a positive directorius commit status to GitHub.
 
-## Configuration
+When all GitHub merge requirements are fulfilled, the PR is expected to be
+merged automatically (automerge) by GitHub.
+
+It comes with a basic webinterface that allows viewing the queues and
+prioritizing PRs.
+
+## Setup 
+
+### Configuration File
 
 A documented example configuration file can be found in the repository:
 [config.example.toml](config.example.toml).
 
-## Typical GitHub Setup for Directorius
+### Typical GitHub Repository Setup
 
 GitHub Repository Settings:
 
