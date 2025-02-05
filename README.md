@@ -1,11 +1,11 @@
 # Directorius
 
-Directorius provides a merge queue for GitHub pull requests (PR).
+Directorius provides a merge queue for GitHub pull requests (PR). \
 It relies on GitHub webhook events, its REST and graphQL API, branch protection
-rules and can work together with Jenkins.
+rules and can schedule Jenkins jobs.
 
-A pull request enters the queue when auto-merge is enabled or a
-configurable label is added to it.
+A pull request enters the queue when auto-merge is enabled or a configurable
+label is added to it. \
 Directorius maintains 2 states for PRs:
 
 - an ordered active queue for PRs that are ready to be processed
