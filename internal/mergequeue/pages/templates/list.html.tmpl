@@ -108,44 +108,53 @@
 
     <div id="configuration">
       <section>
-        <header>
-          <h2>Configuration</h2>
+        <header><h2>Configuration</h2></header>
+        <ul>
+          <li><b>Enqueue on Automerge:</b>{{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}</li>
+          <li>
+            <b>Enqueue on PR Labels:</b>
+            {{ if .TriggerLabels }}
             <ul>
-              <li><b>Enqueue on Automerge:</b>{{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}</li>
-              <li>
-                <b>Enqueue on PR Labels:</b>
-                {{ if .TriggerLabels }}
-                <ul>
-                  {{ range .TriggerLabels }}
-                  <li>{{ . }}</li>
-                  {{ end }}
-                </ul>
-                {{ else }}
-                disabled
-                {{ end }}
-              </li>
-              <li>
-                <b>Monitored Repositories:</b>
-                <ul>
-                  {{ range .MonitoredRepositories }}
-                  <li>{{ . }}</li>
-                  {{ end }}
-                </ul>
-                <li><b>Processed Events:</b> {{ .ProcessedEvents }}</li>
-                <li><b>Active PR Periodic Check Interval:</b> {{ .PeriodicTriggerInterval }}</li>
-                <li><b>CI Server:</b> {{ .CIServer }}</li>
-                {{ if .CIJobURLs }}
-                <li>
-                  <b>CI Jobs:</b>
-                  <ul>
-                    {{ range .CIJobURLs }}
-                    <li>{{ . }}</li>
-                    {{ end }}
-                  </ul>
-                </li>
-                {{ end }}
+              {{ range .TriggerLabels }}
+              <li>{{ . }}</li>
+              {{ end }}
             </ul>
-        </header>
+            {{ else }}
+            disabled
+            {{ end }}
+          </li>
+          <li>
+            <b>Monitored Repositories:</b>
+            <ul>
+              {{ range .MonitoredRepositories }}
+              <li>{{ . }}</li>
+              {{ end }}
+            </ul>
+            <li><b>Processed Events:</b> {{ .ProcessedEvents }}</li>
+            <li><b>Active PR Periodic Check Interval:</b> {{ .PeriodicTriggerInterval }}</li>
+            <li><b>CI Server:</b> {{ .CIServer }}</li>
+            {{ if .CIJobs }}
+            <li>
+              <b>Jenkins Jobs:</b>
+              <table class="table_jenkins_jobs">
+                <thead>
+                  <tr>
+                    <th>GitHub Check/Status Name</th>
+                    <th>URL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                {{ range $context, $jobURL := .CIJobs }}
+                  <tr>
+                    <td>{{ $context }}</td>
+                    <td>{{ $jobURL }}</td>
+                  </tr>
+                {{ end }}
+                </tbody>
+              </table>
+            </li>
+            {{ end }}
+        </ul>
       </section>
     </div>
 

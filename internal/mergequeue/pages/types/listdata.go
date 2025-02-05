@@ -10,7 +10,8 @@ type ListData struct {
 	PeriodicTriggerInterval time.Duration
 	ProcessedEvents         uint64
 	CIServer                string
-	CIJobURLs               []string
+	// CIJobs is map of github context to relative Job URL
+	CIJobs map[string]string
 
 	PriorityChangePostURL string
 	SuspendResumePostURL  string

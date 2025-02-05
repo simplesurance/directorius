@@ -39,8 +39,9 @@ func (a *Coordinator) httpListData() *types.ListData {
 		result.CIServer = a.CI.Client.String()
 	}
 
-	for _, j := range a.CI.Jobs {
-		result.CIJobURLs = append(result.CIJobURLs, j.RelURL)
+	result.CIJobs = make(map[string]string, len(a.CI.Jobs))
+	for context, j := range a.CI.Jobs {
+		result.CIJobs[context] = j.RelURL
 	}
 
 	for baseBranch, queue := range a.queues {

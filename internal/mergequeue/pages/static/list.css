@@ -112,6 +112,10 @@ div[id=configuration] {
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
+.table_jenkins_jobs {
+  width: 95ch;
+}
+
 div[id="explanation"] {
   margin-top: 6.25rem;
 }
