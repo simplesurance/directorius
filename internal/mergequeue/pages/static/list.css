@@ -116,6 +116,22 @@ div[id=configuration] {
   width: 95ch;
 }
 
+.table_jenkins_jobs {
+  width: 99%;
+  border-spacing: 0;
+  margin-bottom: 1rem;
+}
+
+.table_jenkins_jobs td,
+.table_jenkins_jobs th {
+  border: 1px solid black;
+}
+
+.table_jenkins_jobs thead {
+  background-color: #f7fafc;
+  border-bottom: 2px solid #e2e8f0;
+}
+
 div[id="explanation"] {
   margin-top: 6.25rem;
 }
