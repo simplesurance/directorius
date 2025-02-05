@@ -27,7 +27,7 @@ func (a *Coordinator) httpListData() *types.ListData {
 	}
 
 	for k := range a.MonitoredRepositories {
-		result.MonitoredRepositoriesitories = append(result.MonitoredRepositoriesitories, k.String())
+		result.MonitoredRepositories = append(result.MonitoredRepositories, k.String())
 	}
 
 	result.PeriodicTriggerInterval = a.periodicTriggerIntv

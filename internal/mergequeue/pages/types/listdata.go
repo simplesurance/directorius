@@ -3,14 +3,14 @@ package types
 import "time"
 
 type ListData struct {
-	Queues                       []*Queue
-	TriggerOnAutomerge           bool
-	TriggerLabels                []string
-	MonitoredRepositoriesitories []string
-	PeriodicTriggerInterval      time.Duration
-	ProcessedEvents              uint64
-	CIServer                     string
-	CIJobURLs                    []string
+	Queues                  []*Queue
+	TriggerOnAutomerge      bool
+	TriggerLabels           []string
+	MonitoredRepositories   []string
+	PeriodicTriggerInterval time.Duration
+	ProcessedEvents         uint64
+	CIServer                string
+	CIJobURLs               []string
 
 	PriorityChangePostURL string
 	SuspendResumePostURL  string
