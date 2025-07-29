@@ -1,4 +1,4 @@
-package types
+package pagestypes
 
 import "time"
 

@@ -1,4 +1,4 @@
-package types
+package pagestypes
 
 type Queue struct {
 	RepositoryOwner string
