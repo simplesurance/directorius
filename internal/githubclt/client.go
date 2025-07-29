@@ -201,6 +201,11 @@ func (clt *Client) UpdateBranch(ctx context.Context, owner, repo string, pullReq
 
 					return nil, goorderr.NewRetryableAnytimeError(err)
 				}
+
+				if strings.Contains(respErr.Message, "no new commits on the base branch") {
+					logger.Debug("branch is already up-to-date with base branch, considering update successful")
+					return &UpdateBranchResult{HeadCommitID: prHEADSHA}, nil
+				}
 			}
 		}
 
