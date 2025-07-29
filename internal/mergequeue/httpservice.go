@@ -10,10 +10,8 @@ import (
 	"path"
 	"strconv"
 
-	_ "embed" // used to embed html templates and static docs
-
 	"github.com/simplesurance/directorius/internal/logfields"
-	"github.com/simplesurance/directorius/internal/mergequeue/pages/types"
+	"github.com/simplesurance/directorius/internal/mergequeue/pages/pagestypes"
 
 	"go.uber.org/zap"
 )
@@ -200,7 +198,7 @@ func formToPriorityUpdates(form url.Values) (*PRPriorityUpdates, error) {
 			return nil, fmt.Errorf("form key %q is not a pull request number", k)
 		}
 		val := vals[0]
-		if val == types.OptionValueSelected {
+		if val == pagestypes.OptionValueSelected {
 			// priority has not been modified
 			continue
 		}

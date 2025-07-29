@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/simplesurance/directorius/internal/mergequeue/pages/types"
+	"github.com/simplesurance/directorius/internal/mergequeue/pages/pagestypes"
 )
 
-func (a *Coordinator) httpListData() *types.ListData {
-	result := types.ListData{
+func (a *Coordinator) httpListData() *pagestypes.ListData {
+	result := pagestypes.ListData{
 		CreatedAt:             time.Now(),
 		PriorityChangePostURL: handlerPriorityUpdatePath,
 		SuspendResumePostURL:  handlerSuspendResumePath,
@@ -45,7 +45,7 @@ func (a *Coordinator) httpListData() *types.ListData {
 	}
 
 	for baseBranch, queue := range a.queues {
-		queueData := types.Queue{
+		queueData := pagestypes.Queue{
 			RepositoryOwner: baseBranch.RepositoryOwner,
 			Repository:      baseBranch.Repository,
 			BaseBranch:      baseBranch.Branch,
@@ -66,8 +66,8 @@ func (a *Coordinator) httpListData() *types.ListData {
 	return &result
 }
 
-func toPagesPullRequests(prs []*PullRequest) []*types.PullRequest {
-	result := make([]*types.PullRequest, 0, len(prs))
+func toPagesPullRequests(prs []*PullRequest) []*pagestypes.PullRequest {
+	result := make([]*pagestypes.PullRequest, 0, len(prs))
 	for i, pr := range prs {
 		result = append(result, toPagesPullRequest(pr, i == 0))
 	}
@@ -75,22 +75,22 @@ func toPagesPullRequests(prs []*PullRequest) []*types.PullRequest {
 	return result
 }
 
-func toPagesPullRequest(pr *PullRequest, isFirst bool) *types.PullRequest {
-	return &types.PullRequest{
+func toPagesPullRequest(pr *PullRequest, isFirst bool) *pagestypes.PullRequest {
+	return &pagestypes.PullRequest{
 		Number:   strconv.Itoa(pr.Number),
-		Priority: types.PRPriorityOptions(pr.Number, pr.Priority.Load()),
-		Link: &types.Link{
+		Priority: pagestypes.PRPriorityOptions(pr.Number, pr.Priority.Load()),
+		Link: &pagestypes.Link{
 			Text: fmt.Sprintf("%s (#%d)", pr.Title, pr.Number),
 			URL:  pr.Link,
 		},
-		Author: &types.Link{
+		Author: &pagestypes.Link{
 			Text: pr.Author,
 			URL:  urlJoin("https://github.com", pr.Author),
 		},
-		EnqueuedSince:      types.TimeSince(pr.EnqueuedAt),
-		InActiveQueueSince: types.TimeSince(pr.InActiveQueueSince()),
+		EnqueuedSince:      pagestypes.TimeSince(pr.EnqueuedAt),
+		InActiveQueueSince: pagestypes.TimeSince(pr.InActiveQueueSince()),
 		Suspensions:        pr.SuspendCount.Load(),
-		Status:             types.PRStatus(isFirst),
+		Status:             pagestypes.PRStatus(isFirst),
 	}
 }
 
