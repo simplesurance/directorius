@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/go-github/v67/github"
+
 	"github.com/simplesurance/directorius/internal/goorderr"
 
 	"github.com/shurcooL/githubv4"
@@ -56,14 +57,14 @@ func TestUpdateBranch_SuccessWhenBranchIsAlreadyUpToDate(t *testing.T) {
 	// Mock for the initial PRIsUptodate check, which gets the pull request.
 	// We return "mergeable_state": "behind" to ensure the client proceeds to the update step.
 	mux.HandleFunc("/repos/owner/repo/pulls/1", func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, http.MethodGet, r.Method)
 		fmt.Fprint(w, `{"head": {"sha": "test-sha"}, "base": {"ref": "main"}, "mergeable_state": "behind", "state": "open"}`)
 	})
 
 	// Mock for the update-branch call itself.
 	// This is the core of the test: we simulate the specific 422 error that should be handled as a success.
 	mux.HandleFunc("/repos/owner/repo/pulls/1/update-branch", func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, http.MethodPut, r.Method)
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		fmt.Fprint(w, `{"message": "There are no new commits on the base branch."}`)
 	})
