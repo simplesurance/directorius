@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -136,10 +137,11 @@ func mockFailedGithubUpdateBranchCall(clt *mocks.MockGithubClient, expectedPRNr 
 type mergeStatusMock struct {
 	githubclt.ReadyForMergeStatus
 	*gomock.Call
+	mu sync.Mutex
 }
 
 func mockReadyForMergeStatus(clt *mocks.MockGithubClient, prNumber int, reviewDecision githubclt.ReviewDecision, checkState githubclt.CIStatus) *mergeStatusMock {
-	res := mergeStatusMock{
+	res := &mergeStatusMock{
 		ReadyForMergeStatus: githubclt.ReadyForMergeStatus{
 			ReviewDecision: reviewDecision,
 			CIStatus:       checkState,
@@ -156,12 +158,23 @@ func mockReadyForMergeStatus(clt *mocks.MockGithubClient, prNumber int, reviewDe
 		EXPECT().
 		ReadyForMerge(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(prNumber)).
 		DoAndReturn(func(context.Context, string, string, int) (*githubclt.ReadyForMergeStatus, error) {
-			return &res.ReadyForMergeStatus, nil
+			res.mu.Lock()
+			defer res.mu.Unlock()
+
+			// return a copy of the object to avoid race conditions
+			status := res.ReadyForMergeStatus
+			status.Statuses = make([]*githubclt.CIJobStatus, len(res.Statuses))
+			for i, s := range res.Statuses {
+				sCopy := *s
+				status.Statuses[i] = &sCopy
+			}
+
+			return &status, nil
 		})
 
 	res.Call = mockCall
 
-	return &res
+	return res
 }
 
 const buildURLFromQueueItemID = "http://localhost.invalid/job/build/1"
@@ -876,8 +889,8 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 			waitForActiveQueueLen(t, queueBaseBranch2, 1)
 			assert.Equal(t, 0, queueBaseBranch2.suspendedLen(), "suspend queue")
 
-			setReadyForMergeCiStatus(&mergeStatusPr1.ReadyForMergeStatus, githubclt.CIStatusFailure)
-			setReadyForMergeCiStatus(&mergeStatusPr3.ReadyForMergeStatus, githubclt.CIStatusFailure)
+			setReadyForMergeCiStatus(mergeStatusPr1, githubclt.CIStatusFailure)
+			setReadyForMergeCiStatus(mergeStatusPr3, githubclt.CIStatusFailure)
 			evChan <- tc.newResumeEventFn(pr1.Branch, pr2.Branch, pr3.Branch)
 
 			waitForSuspendQueueLen(t, queueBaseBranch1, 1)
@@ -889,7 +902,10 @@ func TestFailedStatusEventSuspendsFirstPR(t *testing.T) {
 	}
 }
 
-func setReadyForMergeCiStatus(ciStatus *githubclt.ReadyForMergeStatus, newStatus githubclt.CIStatus) {
+func setReadyForMergeCiStatus(ciStatus *mergeStatusMock, newStatus githubclt.CIStatus) {
+	ciStatus.mu.Lock()
+	defer ciStatus.mu.Unlock()
+
 	for _, s := range ciStatus.Statuses {
 		s.Status = newStatus
 	}
