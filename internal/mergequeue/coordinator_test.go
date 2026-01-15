@@ -163,8 +163,8 @@ func mockReadyForMergeStatus(clt *mocks.MockGithubClient, prNumber int, reviewDe
 
 			// return a copy of the object to avoid race conditions
 			status := res.ReadyForMergeStatus
-			status.Statuses = make([]*githubclt.CIJobStatus, len(res.ReadyForMergeStatus.Statuses))
-			for i, s := range res.ReadyForMergeStatus.Statuses {
+			status.Statuses = make([]*githubclt.CIJobStatus, len(res.Statuses))
+			for i, s := range res.Statuses {
 				sCopy := *s
 				status.Statuses[i] = &sCopy
 			}
