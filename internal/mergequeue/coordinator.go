@@ -932,7 +932,7 @@ func (a *Coordinator) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 	metrics.DequeueOpsInc(&baseBranch.BranchID)
 
 	if q.IsEmpty() {
-		q.Stop()
+		q.Wait()
 		delete(a.queues, baseBranch.BranchID)
 
 		logger := a.Logger.With(pr.LogFields...).With(baseBranch.Logfields...)
