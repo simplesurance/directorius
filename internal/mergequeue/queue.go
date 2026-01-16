@@ -1143,6 +1143,10 @@ func (q *queue) getExecuting() *runningOperation {
 	return q.executing.Load()
 }
 
+func (q *queue) Wait() {
+	q.actionPool.Wait()
+}
+
 func (q *queue) setExecuting(v *runningOperation) {
 	q.executing.Store(v)
 }
