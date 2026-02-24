@@ -434,9 +434,12 @@ func (a *Coordinator) processPullRequestEvent(ctx context.Context, logger *zap.L
 		}
 		// If pr == nil, it means that the queue has already been deleted earlier by another event.
 		if pr == nil {
-				logger.Warn("PR already dequeued or queue non-existent")
-				return
-	    	}
+			logger.Warn(
+				"PR already dequeued or queue non-existent",
+			)
+			return
+		}
+
 		if ev.PullRequest.GetMerged() {
 			metrics.RecordTimeToMerge(time.Since(pr.EnqueuedAt), owner, repo)
 		}
