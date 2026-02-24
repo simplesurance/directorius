@@ -432,7 +432,11 @@ func (a *Coordinator) processPullRequestEvent(ctx context.Context, logger *zap.L
 			)
 			return
 		}
-
+		// If pr == nil, it means that the queue has already been deleted earlier by another event.
+		if pr == nil {
+				logger.Warn("PR already dequeued or queue non-existent")
+				return
+	    	}
 		if ev.PullRequest.GetMerged() {
 			metrics.RecordTimeToMerge(time.Since(pr.EnqueuedAt), owner, repo)
 		}
@@ -926,6 +930,10 @@ func (a *Coordinator) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 
 	pr, err := q.Dequeue(prNumber, setPendingStatusState)
 	if err != nil {
+		// If there is a queue but no PR in it, this may also be a duplicate.
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("removing pr from merge queue failed: %w", err)
 	}
 
