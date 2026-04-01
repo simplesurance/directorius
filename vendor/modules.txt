@@ -94,8 +94,8 @@ go.uber.org/zap/zaptest
 # go.yaml.in/yaml/v2 v2.4.2
 ## explicit; go 1.15
 go.yaml.in/yaml/v2
-# golang.org/x/oauth2 v0.31.0
-## explicit; go 1.24.0
+# golang.org/x/oauth2 v0.36.0
+## explicit; go 1.25.0
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
 # golang.org/x/sys v0.35.0
