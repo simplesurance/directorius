@@ -23,6 +23,7 @@ type PR struct {
 	BaseBranch       string
 	HeadCommit       string
 	Author           string
+	Assignees        []string
 	Title            string
 	Link             string
 	Statuses         []*Status
@@ -42,6 +43,11 @@ type listPRsQuery struct {
 				Author      struct {
 					Login string
 				}
+				Assignees struct {
+					Nodes []struct {
+						Login string
+					}
+				} `graphql:"assignees(first: 10)"`
 				Number int
 				Labels struct {
 					PageInfo PageInfo
@@ -135,6 +141,11 @@ func (clt *Client) prsWithLabelQueryToPrsWithLabelResult(q *listPRsQuery) []*PR 
 			AutoMergeEnabled: !pr.AutoMergeRequest.EnabledAt.IsZero(),
 			HeadCommit:       pr.HeadRef.Target.Commit.Oid,
 		}
+		prR.Assignees = make([]string, 0, len(pr.Assignees.Nodes))
+		for _, a := range pr.Assignees.Nodes {
+			prR.Assignees = append(prR.Assignees, a.Login)
+		}
+
 		prR.Statuses = make([]*Status, 0, len(pr.HeadRef.Target.Commit.Status.Contexts))
 		for _, context := range pr.HeadRef.Target.Commit.Status.Contexts {
 			prR.Statuses = append(prR.Statuses, &Status{

@@ -6,7 +6,8 @@ type PullRequest struct {
 	Number             string
 	Priority           []*Option
 	Link               *Link
-	Author             *Link
+	Author             *Person
+	Assignees          []*Person
 	EnqueuedSince      string
 	InActiveQueueSince string
 	Suspensions        uint32

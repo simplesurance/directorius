@@ -582,6 +582,28 @@ func (a *Coordinator) processPullRequestEvent(ctx context.Context, logger *zap.L
 			logfields.BaseBranch(bb.Branch),
 		)
 
+	case "assigned", "unassigned":
+		bb, err := NewBaseBranch(owner, repo, baseBranch)
+		if err != nil {
+			logger.Warn(
+				"ignoring event, incomplete base branch information",
+				zap.Error(err),
+			)
+			return
+		}
+
+		err = a.SetPRAssignees(bb, prNumber, assigneeLogins(ev.GetPullRequest().Assignees))
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				logger.Debug("ignoring event, pr is not queued")
+				return
+			}
+			logger.Error("updating pr assignees failed", zap.Error(err))
+			return
+		}
+
+		logger.Debug("updated pr assignees")
+
 	default:
 		logger.Debug("ignoring irrelevant pull request event")
 	}
@@ -987,6 +1009,27 @@ func (a *Coordinator) SetPRStaleSinceIfNewer(
 	}
 
 	return q.SetPRStaleSinceIfNewer(prNumber, updatedAt)
+}
+
+// SetPRAssignees replaces the assignees of a queued PR.
+// If the PR is not queued, ErrNotFound is returned.
+func (a *Coordinator) SetPRAssignees(baseBranch *BaseBranch, prNumber int, logins []string) error {
+	a.queuesLock.Lock()
+	defer a.queuesLock.Unlock()
+
+	q, exist := a.queues[baseBranch.BranchID]
+	if !exist {
+		return ErrNotFound
+	}
+
+	pr := q.getPullRequest(prNumber)
+	if pr == nil {
+		return ErrNotFound
+	}
+
+	pr.SetAssignees(logins)
+
+	return nil
 }
 
 // ResumeIfStatusPositive schedules processPR for all PRs of branchNames that

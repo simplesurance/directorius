@@ -1,210 +1,220 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
-    <link rel="icon" type="image/x-icon" href="static/favicon.svg">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
     <link rel="stylesheet" type="text/css" href="static/list.css">
     <title>Directorius</title>
   </head>
 
-
   <body>
     {{ $data := . }}
-    <h1>Directorius</h1>
-    <h2>Merge Queues</h2>
-    <div id="queue_content">
+    <header class="topbar">
+      <div class="brand">
+        <img src="static/favicon.svg" alt="" width="28" height="28">
+        <span class="brand-name">Directorius</span>
+        <span class="brand-tag">merge queue</span>
+      </div>
+      <div class="topbar-meta">
+        <span class="live-dot"></span>
+        {{ .ProcessedEvents }} events · generated {{ .CreatedAt.Format "15:04:05 MST" }}
+      </div>
+    </header>
+
+    <main>
       {{ if not .Queues }}
-      <section> No Pull-Requests enqueued.</section>
+      <section class="card empty">
+        <div class="empty-icon">🌱</div>
+        <p>No pull requests enqueued. All quiet.</p>
+      </section>
       {{ end }}
-      {{ range $queue := .Queues }}
-      <section>
-        <h3>Repository: {{ $queue.RepositoryOwner }}/{{ $queue.Repository }}, Base Branch: {{ $queue.BaseBranch }}</h3>
-        <form action="{{ $data.SuspendResumePostURL }}" method="post">
-          <input type="hidden" name="repository_owner" value="{{ $queue.RepositoryOwner }}"/>
-          <input type="hidden" name="repository" value="{{ $queue.Repository }}"/>
-          <input type="hidden" name="base_branch" value="{{ $queue.BaseBranch }}"/>
-          {{ if $queue.Paused }}
-          <button type="submit" name="action" value="resume" id="button_resume"/>⏵ Resume Merge Queue</button>
-          {{ else }}
-          <button type="submit" name="action" value="pause" id="buttom_pause"/>⏸ Pause Merge Queue</button>
-          {{ end }}
-        </form>
+
+      {{ range $qi, $queue := .Queues }}
+      {{ $form := printf "priority_form_%d" $qi }}
+      <section class="card queue{{ if $queue.Paused }} is-paused{{ end }}">
+        <div class="queue-head">
+          <div class="queue-title">
+            <h2><span class="owner">{{ $queue.RepositoryOwner }}/</span>{{ $queue.Repository }}</h2>
+            <span class="branch">⎇ {{ $queue.BaseBranch }}</span>
+            <span class="counts">{{ len $queue.ActivePRs }} active · {{ len $queue.SuspendedPRs }} suspended</span>
+          </div>
+          <form action="{{ $data.SuspendResumePostURL }}" method="post">
+            <input type="hidden" name="repository_owner" value="{{ $queue.RepositoryOwner }}"/>
+            <input type="hidden" name="repository" value="{{ $queue.Repository }}"/>
+            <input type="hidden" name="base_branch" value="{{ $queue.BaseBranch }}"/>
+            {{ if $queue.Paused }}
+            <button type="submit" name="action" value="resume" class="btn btn-go">⏵ Resume queue</button>
+            {{ else }}
+            <button type="submit" name="action" value="pause" class="btn btn-ghost">⏸ Pause queue</button>
+            {{ end }}
+          </form>
+        </div>
+
+        {{ if $queue.Paused }}
+        <div class="paused-banner">Paused — no pull request is processed until the queue is resumed.</div>
+        {{ end }}
+
         {{ if or $queue.ActivePRs $queue.SuspendedPRs }}
-        <div class="queue_table_container">
-          {{ if $queue.Paused }}
-          <div class="paused-overlay">PAUSED</div>
-          <table class="queue_table queue_table_paused">
-          {{ else }}
-          <table class="queue_table">
-          {{ end }}
+        <div class="table-wrap">
+          <table class="queue-table">
             <thead><tr>
-              <th>Rank</th>
+              <th class="col-rank">#</th>
               <th>Priority</th>
-              <th>Pull Request</th>
+              <th>Pull request</th>
               <th>Author</th>
-              <th>In Mergequeue (Not Suspended)</th>
-              <th>Suspensions</th>
+              <th>Assignee</th>
+              <th>In queue <span class="muted">(active)</span></th>
+              <th class="col-num">Suspensions</th>
               <th>Status</th>
             </tr></thead>
             <tbody>
               {{ range $i, $pr := $queue.ActivePRs }}
-                <tr class="tr_active_prs">
-                  <td>{{ add $i 1 }}</td>
-                  <td>
-                    <select name="{{ $pr.Number }}" form="priority_form">
-                    {{ range $priority := .Priority }}
-                    <option id="{{ $priority.ID }}" value="{{ $priority.Value }}" {{ if $priority.Selected }}selected{{ end }}>{{ $priority.Text }}</option>
-                    {{ end }}
-                    </select>
-                  </td>
-                  <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
-                  <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
-                  <td>
-                    {{ $pr.EnqueuedSince }}
-                    {{ if $pr.InActiveQueueSince }}
-                    ({{ $pr.InActiveQueueSince }})
-                    {{ end }}
-                  </td>
-                  <td>{{ $pr.Suspensions }}</td>
-                  {{ if eq $i 0 }}
-                  <td id="td_status_updating">{{ $pr.Status }}</td>
+              <tr class="{{ if eq $i 0 }}is-head{{ else }}is-queued{{ end }}">
+                <td class="col-rank"><span class="rank">{{ add $i 1 }}</span></td>
+                <td>{{ template "priority" (dict "PR" $pr "Form" $form) }}</td>
+                <td class="col-pr"><a href="{{ $pr.Link.URL }}"><span class="pr-number">#{{ $pr.Number }}</span> {{ $pr.Link.Text }}</a></td>
+                <td>{{ with $pr.Author }}{{ template "person" . }}{{ else }}<span class="muted">—</span>{{ end }}</td>
+                <td>{{ template "persons" $pr.Assignees }}</td>
+                <td class="col-time">
+                  {{ $pr.EnqueuedSince }}
+                  {{ if $pr.InActiveQueueSince }}<span class="muted">({{ $pr.InActiveQueueSince }})</span>{{ end }}
+                </td>
+                <td class="col-num">{{ $pr.Suspensions }}</td>
+                <td>
+                  {{ if and (eq $i 0) $queue.Paused }}
+                  <span class="pill">paused</span>
+                  {{ else if eq $i 0 }}
+                  <span class="pill pill-processing"><span class="pulse"></span>{{ $pr.Status }}</span>
                   {{ else }}
-                  <td class="td_status_queued">{{ $pr.Status }}</td>
+                  <span class="pill pill-queued">{{ $pr.Status }}</span>
                   {{ end }}
-                  </tr>
-                  {{ end }}
-                  {{ range $i, $pr := $queue.SuspendedPRs }}
-                  <tr class="tr_suspended_prs">
-                    <td></td>
-                    <td>
-                      <select name="{{ $pr.Number }}" form="priority_form">
-                        {{ range $priority := .Priority }}
-                        <option id="{{ $priority.ID }}" value="{{ $priority.Value }}" {{ if $priority.Selected }}selected{{ end }}>{{ $priority.Text }}</option>
-                        {{ end }}
-                      </select>
-                    </td>
-                    <td><a href="{{ $pr.Link.URL }}">{{ $pr.Link.Text }}</a></td>
-                    <td><a href="{{ $pr.Author.URL }}">{{ $pr.Author.Text }}</a></td>
-                    <td>{{ $pr.EnqueuedSince }}</td>
-                    <td>{{ $pr.Suspensions }}</td>
-                    <td class="td_status_suspended">Suspended</td>
-                  </tr>
-                  {{ end }}
-                </tbody>
-              </table>
-            </div>
-            <form id="priority_form" action={{ $data.PriorityChangePostURL }} method="post">
-              <input type="hidden" name="owner" value="{{ $queue.RepositoryOwner }}">
-              <input type="hidden" name="repository" value="{{ $queue.Repository }}">
-              <input type="hidden" name="basebranch" value="{{ $queue.BaseBranch }}">
-              <input type="submit" value="Update Priorities" id="submit_priorities">
-            </form>
-        </section>
+                </td>
+              </tr>
+              {{ end }}
+              {{ range $pr := $queue.SuspendedPRs }}
+              <tr class="is-suspended">
+                <td class="col-rank"></td>
+                <td>{{ template "priority" (dict "PR" $pr "Form" $form) }}</td>
+                <td class="col-pr"><a href="{{ $pr.Link.URL }}"><span class="pr-number">#{{ $pr.Number }}</span> {{ $pr.Link.Text }}</a></td>
+                <td>{{ with $pr.Author }}{{ template "person" . }}{{ else }}<span class="muted">—</span>{{ end }}</td>
+                <td>{{ template "persons" $pr.Assignees }}</td>
+                <td class="col-time">{{ $pr.EnqueuedSince }}</td>
+                <td class="col-num">{{ $pr.Suspensions }}</td>
+                <td><span class="pill pill-suspended">suspended</span></td>
+              </tr>
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
+        <form id="{{ $form }}" class="queue-foot" action="{{ $data.PriorityChangePostURL }}" method="post">
+          <input type="hidden" name="owner" value="{{ $queue.RepositoryOwner }}">
+          <input type="hidden" name="repository" value="{{ $queue.Repository }}">
+          <input type="hidden" name="basebranch" value="{{ $queue.BaseBranch }}">
+          <span class="muted legend">🚨 urgent · 🏃 high · ⚖️ normal · 🐌 low</span>
+          <button type="submit" class="btn btn-primary">Update priorities</button>
+        </form>
         {{ else }}
-        <section>Base branch queue is empty.</section>
+        <p class="muted queue-empty">Queue is empty.</p>
         {{ end }}
+      </section>
+      {{ end }}
+
+      <details class="card">
+        <summary>Configuration</summary>
+        <dl class="config">
+          <dt>Enqueue on auto-merge</dt>
+          <dd>{{ if .TriggerOnAutomerge }}<span class="pill pill-processing">enabled</span>{{ else }}<span class="pill">disabled</span>{{ end }}</dd>
+
+          <dt>Enqueue on PR labels</dt>
+          <dd>{{ if .TriggerLabels }}{{ range .TriggerLabels }}<span class="tag">{{ . }}</span>{{ end }}{{ else }}disabled{{ end }}</dd>
+
+          <dt>Monitored repositories</dt>
+          <dd>{{ range .MonitoredRepositories }}<span class="tag">{{ . }}</span>{{ end }}</dd>
+
+          <dt>Processed events</dt>
+          <dd>{{ .ProcessedEvents }}</dd>
+
+          <dt>Active PR periodic check interval</dt>
+          <dd>{{ .PeriodicTriggerInterval }}</dd>
+
+          <dt>CI server</dt>
+          <dd>{{ .CIServer }}</dd>
+        </dl>
+        {{ if .CIJobs }}
+        <h3>Jenkins jobs</h3>
+        <div class="table-wrap">
+          <table class="jobs-table">
+            <thead><tr><th>GitHub check/status name</th><th>URL</th></tr></thead>
+            <tbody>
+              {{ range $context, $jobURL := .CIJobs }}
+              <tr><td>{{ $context }}</td><td><code>{{ $jobURL }}</code></td></tr>
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
         {{ end }}
-    </div>
+      </details>
 
-    <div id="configuration">
-      <section>
-        <header><h2>Configuration</h2></header>
-        <ul>
-          <li><b>Enqueue on Automerge: </b>{{ if .TriggerOnAutomerge }}enabled{{ else }}disabled{{ end}}</li>
-          <li>
-            <b>Enqueue on PR Labels:</b>
-            {{ if .TriggerLabels }}
-            <ul>
-              {{ range .TriggerLabels }}
-              <li>{{ . }}</li>
-              {{ end }}
-            </ul>
-            {{ else }}
-            disabled
-            {{ end }}
-          </li>
-          <li>
-            <b>Monitored Repositories:</b>
-            <ul>
-              {{ range .MonitoredRepositories }}
-              <li>{{ . }}</li>
-              {{ end }}
-            </ul>
-            <li><b>Processed Events:</b> {{ .ProcessedEvents }}</li>
-            <li><b>Active PR Periodic Check Interval:</b> {{ .PeriodicTriggerInterval }}</li>
-            <li><b>CI Server:</b> {{ .CIServer }}</li>
-            {{ if .CIJobs }}
-            <li>
-              <b>Jenkins Jobs:</b>
-              <table class="table_jenkins_jobs">
-                <thead>
-                  <tr>
-                    <th>GitHub Check/Status Name</th>
-                    <th>URL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                {{ range $context, $jobURL := .CIJobs }}
-                  <tr>
-                    <td>{{ $context }}</td>
-                    <td>{{ $jobURL }}</td>
-                  </tr>
-                {{ end }}
-                </tbody>
-              </table>
-            </li>
-            {{ end }}
-        </ul>
-      </section>
-    </div>
+      <details class="card">
+        <summary>Help! How does it work?</summary>
+        <div class="help">
+          <p>
+            Directorius provides a merge queue for GitHub pull requests (PRs).
+          </p>
+          <p>
+            A pull request enters the queue when auto-merge is enabled or a
+            configured label is added to it.
+          </p>
+          <p>Directorius maintains 2 states for PRs:</p>
+          <ul>
+            <li>an ordered active queue for PRs that are ready to be
+                processed</li>
+            <li>an unordered suspend queue for PRs that do not meet the
+                merge requirements configured on GitHub.</li>
+          </ul>
+          <p>
+            For the first PR in the active queue, Directorius schedules Jenkins CI
+            jobs, keeps its branch up to date with changes in its base branch, marks
+            it with a queue head label, and reports a positive directorius commit
+            status to GitHub.
+          </p>
+          <p>
+            When all GitHub merge requirements are fulfilled, the PR is expected to
+            be merged automatically by GitHub.
+          </p>
+          <p>
+            A PR moves to the suspend queue when it fails to meet the merge
+            requirements.
+          </p>
+          <p>
+            It returns to the active queue when its branch or its base
+            branch is updated, it is approved, or when a previously failed CI
+            check reported a newer positive result to GitHub.
+          </p>
+        </div>
+      </details>
+    </main>
 
-    <div id="explanation">
-      <section>
-        <h2>Help! How does it work?</h2>
-      <p>
-        Directorius provides a merge queue for GitHub pull requests (PRs).
-      </p>
-      <p>
-        A pull request enters the queue when auto-merge is enabled or a
-        configured label is added to it.
-      </p>
-
-      Directorius maintains 2 states for PRs:
-      <ul>
-        <li>an ordered active queue for PRs that are ready to be
-            processed</li>
-        <li>an unordered suspend queue for PRs that do not meet the
-            merge requirements configured on GitHub.</li>
-      </ul>
-
-      <p>
-        For the first PR in the active queue, Directorius schedules Jenkins CI
-        jobs, keeps its branch up to date with changes in its base branch, marks
-        it with a queue head label, and reports a positive directorius commit
-        status to GitHub.
-      </p>
-      <p>
-        When all GitHub merge requirements are fulfilled, the PR is expected to
-        be merged automatically by GitHub.
-      </p>
-      <p>
-        A PR moves to the suspend queue when it fails to meet the merge
-        requirements.
-      </p>
-      <p>
-        It returns to the active queue when its branch or its base
-        branch is updated, it is approved, or when a previously failed CI
-        check reported a newer positive result to GitHub.
-      </p>
-      </section>
-    </div>
+    <footer>
+      Page generated at {{ .CreatedAt.Format "2006-01-02 15:04:05 MST" }} ·
+      <a href="https://github.com/simplesurance/directorius">simplesurance/directorius</a>
+    </footer>
   </body>
-
-  <footer>
-    <hr>
-    <small>
-      <p>Page generated at: {{ .CreatedAt.Format "2006-01-02 15:04:05 MST" }}</p>
-      <p><a href="https://github.com/simplesurance/directorius">https://github.com/simplesurance/directorius</a></p>
-    </small>
-  </footer>
 </html>
+
+{{ define "person" -}}
+<a class="person" href="{{ .URL }}" title="{{ .Login }}"><span class="avatar" style="--hue: {{ .Hue }}">{{ .Initial }}</span><span class="login">{{ .Login }}</span></a>
+{{- end }}
+
+{{ define "persons" -}}
+{{ if . }}<div class="persons">{{ range . }}{{ template "person" . }}{{ end }}</div>{{ else }}<span class="muted">—</span>{{ end }}
+{{- end }}
+
+{{ define "priority" -}}
+<select name="{{ .PR.Number }}" form="{{ .Form }}" aria-label="Priority of #{{ .PR.Number }}">
+  {{ range $priority := .PR.Priority }}
+  <option id="{{ $priority.ID }}" value="{{ $priority.Value }}" {{ if $priority.Selected }}selected{{ end }}>{{ $priority.Text }}</option>
+  {{ end }}
+</select>
+{{- end }}

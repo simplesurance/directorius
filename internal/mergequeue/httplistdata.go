@@ -1,8 +1,6 @@
 package mergequeue
 
 import (
-	"fmt"
-	"net/url"
 	"slices"
 	"strconv"
 	"time"
@@ -80,24 +78,14 @@ func toPagesPullRequest(pr *PullRequest, isFirst bool) *pagestypes.PullRequest {
 		Number:   strconv.Itoa(pr.Number),
 		Priority: pagestypes.PRPriorityOptions(pr.Number, pr.Priority.Load()),
 		Link: &pagestypes.Link{
-			Text: fmt.Sprintf("%s (#%d)", pr.Title, pr.Number),
+			Text: pr.Title,
 			URL:  pr.Link,
 		},
-		Author: &pagestypes.Link{
-			Text: pr.Author,
-			URL:  urlJoin("https://github.com", pr.Author),
-		},
+		Author:             pagestypes.NewPerson(pr.Author),
+		Assignees:          pagestypes.NewPersons(pr.Assignees()),
 		EnqueuedSince:      pagestypes.TimeSince(pr.EnqueuedAt),
 		InActiveQueueSince: pagestypes.TimeSince(pr.InActiveQueueSince()),
 		Suspensions:        pr.SuspendCount.Load(),
 		Status:             pagestypes.PRStatus(isFirst),
 	}
-}
-
-func urlJoin(base string, elem ...string) string {
-	result, err := url.JoinPath(base, elem...)
-	if err != nil {
-		return ""
-	}
-	return result
 }
