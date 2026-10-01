@@ -294,7 +294,10 @@ func TestPushToBaseBranchTriggersUpdate(t *testing.T) {
 	pr, err := NewPullRequest(1, "pr_branch", "", "", "")
 	require.NoError(t, err)
 
-	mockSuccessfulGithubUpdateBranchCall(ghClient, pr.Number, true).Times(2)
+	var updateBranchCalls atomic.Uint32
+	mockSuccessfulGithubUpdateBranchCall(ghClient, pr.Number, true).
+		Do(func(_, _, _, _ any) { updateBranchCalls.Add(1) }).
+		Times(2)
 	mockReadyForMergeStatus(
 		ghClient, pr.Number,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
@@ -325,6 +328,14 @@ func TestPushToBaseBranchTriggersUpdate(t *testing.T) {
 
 	evChan <- &github_prov.Event{Event: newPushEvent(baseBranch.Branch)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
+	// the update runs async, wait for it before the cleanup cancels it
+	require.Eventuallyf(
+		t,
+		func() bool { return updateBranchCalls.Load() == 2 },
+		condWaitTimeout,
+		condCheckInterval,
+		"UpdateBranch calls: %d, expected: 2", updateBranchCalls.Load(),
+	)
 }
 
 func TestPushToBaseBranchResumesPRs(t *testing.T) {
