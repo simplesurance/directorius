@@ -72,6 +72,46 @@ func TestOverallCIStatus_requiredFailedCheck(t *testing.T) {
 	require.Equal(t, CIStatusFailure, status)
 }
 
+func TestOverallCIStatus_missingRequiredCheckWinsOverPendingRollup(t *testing.T) {
+	status := overallCIStatus(
+		githubv4.StatusStatePending,
+		[]*CIJobStatus{
+			{
+				Name:     "optional_check",
+				Status:   CIStatusPending,
+				Required: false,
+			},
+			{
+				Name:     "required_check",
+				Status:   CIStatusExpected,
+				Required: true,
+			},
+		},
+	)
+
+	require.Equal(t, CIStatusExpected, status)
+}
+
+func TestOverallCIStatus_pendingRollupWithoutMissingRequiredCheck(t *testing.T) {
+	status := overallCIStatus(
+		githubv4.StatusStatePending,
+		[]*CIJobStatus{
+			{
+				Name:     "optional_check",
+				Status:   CIStatusPending,
+				Required: false,
+			},
+			{
+				Name:     "required_check",
+				Status:   CIStatusSuccess,
+				Required: true,
+			},
+		},
+	)
+
+	require.Equal(t, CIStatusPending, status)
+}
+
 func TestOverallCIStatus_Expected(t *testing.T) {
 	status := overallCIStatus(
 		githubv4.StatusStateError,

@@ -77,6 +77,15 @@ func (clt *Client) ReadyForMerge(ctx context.Context, owner, repo string, prNumb
 }
 
 func overallCIStatus(statusCheckRollupState githubv4.StatusState, statuses []*CIJobStatus) CIStatus {
+	required := requiredCIStatus(statuses)
+	// A missing required check wins over the rollup state. The rollup
+	// only covers checks that exist, so an optional check that is still
+	// running would otherwise hide that the required CI jobs were never
+	// triggered.
+	if required == CIStatusExpected {
+		return CIStatusExpected
+	}
+
 	switch statusCheckRollupState {
 	case githubv4.StatusStatePending:
 		return CIStatusPending
@@ -84,6 +93,10 @@ func overallCIStatus(statusCheckRollupState githubv4.StatusState, statuses []*CI
 		return CIStatusExpected
 	}
 
+	return required
+}
+
+func requiredCIStatus(statuses []*CIJobStatus) CIStatus {
 	result := CIStatusSuccess
 	for _, status := range statuses {
 		if !status.Required {
