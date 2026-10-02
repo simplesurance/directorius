@@ -80,6 +80,7 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 			if err != nil {
 				return fmt.Errorf("pr information retrieved from github is incomplete: %w", err)
 			}
+			pr.SetAssignees(ghPR.Assignees)
 
 			logger = logger.With(pr.LogFields...)
 

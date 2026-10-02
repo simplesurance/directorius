@@ -294,7 +294,10 @@ func TestPushToBaseBranchTriggersUpdate(t *testing.T) {
 	pr, err := NewPullRequest(1, "pr_branch", "", "", "")
 	require.NoError(t, err)
 
-	mockSuccessfulGithubUpdateBranchCall(ghClient, pr.Number, true).Times(2)
+	var updateBranchCalls atomic.Uint32
+	mockSuccessfulGithubUpdateBranchCall(ghClient, pr.Number, true).
+		Do(func(_, _, _, _ any) { updateBranchCalls.Add(1) }).
+		Times(2)
 	mockReadyForMergeStatus(
 		ghClient, pr.Number,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
@@ -325,6 +328,14 @@ func TestPushToBaseBranchTriggersUpdate(t *testing.T) {
 
 	evChan <- &github_prov.Event{Event: newPushEvent(baseBranch.Branch)}
 	waitForProcessedEventCnt(t, autoupdater, 1)
+	// the update runs async, wait for it before the cleanup cancels it
+	require.Eventuallyf(
+		t,
+		func() bool { return updateBranchCalls.Load() == 2 },
+		condWaitTimeout,
+		condCheckInterval,
+		"UpdateBranch calls: %d, expected: 2", updateBranchCalls.Load(),
+	)
 }
 
 func TestPushToBaseBranchResumesPRs(t *testing.T) {
@@ -443,7 +454,7 @@ func TestPRBaseBranchChangeMovesItToAnotherQueue(t *testing.T) {
 	require.NotNil(t, queue, "queue for new base branch does not exist")
 
 	require.Equal(t, 1, queue.activeLen())
-	require.Empty(t, queue.suspended)
+	require.Equal(t, 0, queue.suspendedLen())
 }
 
 func TestUnlabellingPRDequeuesPR(t *testing.T) {
@@ -542,7 +553,7 @@ func TestClosingPRDequeuesPR(t *testing.T) {
 	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.NotNil(t, queue)
 	require.Equal(t, 1, queue.activeLen())
-	require.Empty(t, queue.suspended)
+	require.Equal(t, 0, queue.suspendedLen())
 
 	evChan <- &github_prov.Event{Event: newPullRequestClosedEvent(prNumber, prBranch, baseBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 2)
@@ -1043,7 +1054,7 @@ func TestPRIsSuspendedWhenUptodateAndHasFailedStatus(t *testing.T) {
 			queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 			require.NotNil(t, queue)
 			assert.Empty(t, queue.activeLen())
-			assert.Len(t, queue.suspended, 1)
+			assert.Equal(t, 1, queue.suspendedLen())
 		})
 	}
 }
@@ -1325,15 +1336,16 @@ func TestReviewApprovedEventResumesSuspendedPR(t *testing.T) {
 	// PR should be in suspend queue, it is not approved
 	require.NotNil(t, queue)
 	assert.Empty(t, queue.activeLen())
-	assert.Len(t, queue.suspended, 1)
+	assert.Equal(t, 1, queue.suspendedLen())
 
 	mockStatusReturn.ReviewDecision = githubclt.ReviewDecisionApproved
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, false).Times(1)
 
 	evChan <- &github_prov.Event{Event: newPullRequestReviewEvent(prNumber, prBranch, baseBranch, "submitted", "approved")}
 	waitForProcessedEventCnt(t, autoupdater, 2)
-	assert.Equal(t, 1, queue.activeLen())
-	assert.Empty(t, queue.suspended)
+	// resuming runs async in the queue's worker pool
+	waitForActiveQueueLen(t, queue, 1)
+	waitForSuspendQueueLen(t, queue, 0)
 }
 
 func TestDismissingApprovalSuspendsActivePR(t *testing.T) {
@@ -1380,14 +1392,14 @@ func TestDismissingApprovalSuspendsActivePR(t *testing.T) {
 	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
 	require.NotNil(t, queue)
 	assert.Equal(t, 1, queue.activeLen(), "pr not in active queue")
-	assert.Empty(t, queue.suspended, "pr is suspended")
+	assert.Equal(t, 0, queue.suspendedLen(), "pr is suspended")
 
 	mockStatusReturn.ReviewDecision = githubclt.ReviewDecisionChangesRequested
 
 	evChan <- &github_prov.Event{Event: newPullRequestReviewEvent(prNumber, prBranch, baseBranch, "dismissed", "approved")}
 	waitForProcessedEventCnt(t, autoupdater, 2)
 	assert.Empty(t, queue.activeLen(), "pr is active")
-	assert.Len(t, queue.suspended, 1, "pr not suspended")
+	assert.Equal(t, 1, queue.suspendedLen(), "pr not suspended")
 }
 
 func TestRequestingReviewChangesSuspendsPR(t *testing.T) {
@@ -1436,14 +1448,14 @@ func TestRequestingReviewChangesSuspendsPR(t *testing.T) {
 	require.NotNil(t, queue)
 	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
 	assert.Equal(t, 1, queue.activeLen(), "pr not in active queue")
-	assert.Empty(t, queue.suspended, "pr is suspended")
+	assert.Equal(t, 0, queue.suspendedLen(), "pr is suspended")
 
 	mockStatusReturn.ReviewDecision = githubclt.ReviewDecisionChangesRequested
 	evChan <- &github_prov.Event{Event: newPullRequestReviewEvent(prNumber, prBranch, baseBranch, "submitted", "changes_requested")}
 	waitForProcessedEventCnt(t, autoupdater, 2)
 
 	assert.Equal(t, 0, queue.activeLen(), "pr is active")
-	assert.Len(t, queue.suspended, 1, "pr not suspended")
+	assert.Equal(t, 1, queue.suspendedLen(), "pr not suspended")
 }
 
 func TestUpdatesAreResumedIfTestsFailAndBaseIsUpdated(t *testing.T) {
@@ -1488,13 +1500,14 @@ func TestUpdatesAreResumedIfTestsFailAndBaseIsUpdated(t *testing.T) {
 	// PR should be in suspend queue, tests are failing
 	require.NotNil(t, queue)
 	assert.Empty(t, queue.activeLen())
-	assert.Len(t, queue.suspended, 1)
+	assert.Equal(t, 1, queue.suspendedLen())
 
 	mockSuccessfulGithubUpdateBranchCall(ghClient, prNumber, true).Times(1)
 	evChan <- &github_prov.Event{Event: newPushEvent(baseBranch)}
 	waitForProcessedEventCnt(t, autoupdater, 2)
-	assert.Equal(t, 1, queue.activeLen())
-	assert.Empty(t, queue.suspended)
+	// resuming runs async in the queue's worker pool
+	waitForActiveQueueLen(t, queue, 1)
+	waitForSuspendQueueLen(t, queue, 0)
 	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,10 @@ type PullRequest struct {
 	Title     string
 	Link      string
 	LogFields []zap.Field
+
+	// assignees can change while the PR is queued, use
+	// [PullRequest.Assignees] and [PullRequest.SetAssignees].
+	assignees atomic.Pointer[[]string]
 
 	// inActiveQueueSince is the when the PR has been added to the active
 	// queue. When The PR is suspended and resumed it is reset.
@@ -56,13 +61,30 @@ func NewPullRequestFromEvent(ev *github.PullRequest) (*PullRequest, error) {
 		return nil, errors.New("github pull request event is nil")
 	}
 
-	return NewPullRequest(
+	pr, err := NewPullRequest(
 		ev.GetNumber(),
 		ev.GetHead().GetRef(),
 		ev.GetUser().GetLogin(),
 		ev.GetTitle(),
 		ev.GetLinks().GetHTML().GetHRef(),
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	pr.SetAssignees(assigneeLogins(ev.Assignees))
+
+	return pr, nil
+}
+
+func assigneeLogins(users []*github.User) []string {
+	result := make([]string, 0, len(users))
+	for _, u := range users {
+		if login := u.GetLogin(); login != "" {
+			result = append(result, login)
+		}
+	}
+	return result
 }
 
 func NewPullRequest(nr int, branch, author, title, link string) (*PullRequest, error) {
@@ -89,6 +111,7 @@ func NewPullRequest(nr int, branch, author, title, link string) (*PullRequest, e
 		inActiveQueueSince:  atomic.Pointer[time.Time]{},
 	}
 	pr.inActiveQueueSince.Store(&time.Time{})
+	pr.assignees.Store(&[]string{})
 
 	return &pr, nil
 }
@@ -152,4 +175,15 @@ func (p *PullRequest) GetLastStartedCIBuilds() map[string]*jenkins.Build {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return maps.Clone(p.lastStartedCIBuilds)
+}
+
+// Assignees returns the GitHub logins of the users assigned to the PR.
+func (p *PullRequest) Assignees() []string {
+	return slices.Clone(*p.assignees.Load())
+}
+
+// SetAssignees replaces the GitHub logins of the users assigned to the PR.
+func (p *PullRequest) SetAssignees(logins []string) {
+	l := slices.Clone(logins)
+	p.assignees.Store(&l)
 }
