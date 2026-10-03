@@ -189,3 +189,26 @@ func TestEvalPRAction_PendingCIJobs(t *testing.T) {
 	assert.Contains(t, reqActions.Actions, ActionAddFirstInQueueGithubLabel)
 	assert.Contains(t, reqActions.Actions, ActionCreateSuccessfulGithubStatus)
 }
+
+func TestCITriggerNeeded(t *testing.T) {
+	tcs := []struct {
+		name            string
+		task            Task
+		headCommit      string
+		triggeredCommit string
+		want            bool
+	}{
+		{"new commit, periodic run", TaskNone, "b", "a", true},
+		{"new commit, never triggered", TaskNone, "a", "", true},
+		{"same commit, periodic run", TaskNone, "a", "a", false},
+		{"same commit, synchronize", TaskTriggerCI, "a", "a", false},
+		{"unknown commit, periodic run", TaskNone, "", "", false},
+		{"unknown commit, synchronize", TaskTriggerCI, "", "a", true},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ciTriggerNeeded(tc.task, tc.headCommit, tc.triggeredCommit))
+		})
+	}
+}

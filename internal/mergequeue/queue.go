@@ -371,6 +371,7 @@ func (q *queue) suspend(prNumber int) error {
 
 	q.cancelActionForPR(prNumber)
 	pr.SetStateUnchangedSince(time.Time{})
+	pr.SetCITriggeredCommit("")
 
 	q.suspended[prNumber] = pr
 	q.metrics.SuspendQueueSizeInc()
@@ -611,22 +612,37 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 			logger.Info("waiting for github to merge the pull-request", logfields.Reason(reason))
 
 		case ActionTriggerCIJobs:
-			if task == TaskTriggerCI {
-				err := q.ci.Run(ctx, pr, actions.ExpectedCIRuns...)
-				if err != nil {
-					logger.Error("triggering CI jobs failed",
-						zap.Error(err),
-					)
-					return
-				}
-				logger.Info("ci jobs triggered", logfields.Reason(reason))
-				pr.SetStateUnchangedSinceIfNewer(time.Now())
+			if !ciTriggerNeeded(task, actions.HeadCommitID, pr.GetCITriggeredCommit()) {
+				logger.Debug("skipping triggering ci jobs, already triggered for head commit or not requested")
+				continue
 			}
+
+			pr.SetCITriggeredCommit(actions.HeadCommitID)
+			err := q.ci.Run(ctx, pr, actions.ExpectedCIRuns...)
+			if err != nil {
+				logger.Error("triggering CI jobs failed",
+					zap.Error(err),
+				)
+				return
+			}
+			logger.Info("ci jobs triggered", logfields.Reason(reason))
+			pr.SetStateUnchangedSinceIfNewer(time.Now())
 
 		case ActionNone:
 			logger.Info("evaluated status of first pull request in queue, nothing to do", logfields.Reason(reason))
 		}
 	}
+}
+
+// ciTriggerNeeded returns true if CI jobs must be triggered for headCommit.
+// They are triggered once per head commit, on every task, so a lost
+// synchronize event does not leave the queue head without CI.
+// If the head commit is unknown, only TaskTriggerCI triggers them.
+func ciTriggerNeeded(task Task, headCommit, triggeredCommit string) bool {
+	if headCommit == "" {
+		return task == TaskTriggerCI
+	}
+	return headCommit != triggeredCommit
 }
 
 func (q *queue) updatePRWithBase(ctx context.Context, pr *PullRequest) (changed bool, headCommit string, updateBranchErr error) {

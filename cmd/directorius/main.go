@@ -380,6 +380,17 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, 
 		},
 	)
 
+	// Registered before InitSync, so a readiness probe on the web
+	// interface passes while syncing and webhook events sent during the
+	// sync are received and buffered instead of rejected.
+	if config.WebInterfaceEndpoint != "" {
+		mergequeue.NewHTTPService(au, config.WebInterfaceEndpoint).RegisterHandlers(mux)
+		logger.Info(
+			"registered github pull request autoupdater http endpoint",
+			zap.String("endpoint", config.WebInterfaceEndpoint),
+		)
+	}
+
 	ctx, cancelFn := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancelFn()
 	if err := au.InitSync(ctx); err != nil {
@@ -390,14 +401,6 @@ func mustStartPullRequestAutoupdater(config *cfg.Config, ch chan *github.Event, 
 	}
 
 	au.Start()
-
-	if config.WebInterfaceEndpoint != "" {
-		mergequeue.NewHTTPService(au, config.WebInterfaceEndpoint).RegisterHandlers(mux)
-		logger.Info(
-			"registered github pull request autoupdater http endpoint",
-			zap.String("endpoint", config.WebInterfaceEndpoint),
-		)
-	}
 
 	return au
 }
