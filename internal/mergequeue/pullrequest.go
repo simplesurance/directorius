@@ -44,8 +44,11 @@ type PullRequest struct {
 
 	// lastStartedCIBuilds keys are [jenkins.Build.jobName]
 	lastStartedCIBuilds map[string]*jenkins.Build
+	// ciTriggeredCommit is the head commit CI jobs were last triggered
+	// for. It is reset when the PR is suspended.
+	ciTriggeredCommit   string
 	stateUnchangedSince time.Time
-	lock                sync.Mutex // must be held when accessing stateUnchangedSince, lastStartedCIBuilds
+	lock                sync.Mutex // must be held when accessing stateUnchangedSince, lastStartedCIBuilds, ciTriggeredCommit
 
 	GithubStatusLastSetState ReportedStatusState
 	GithubStatusLock         sync.Mutex
@@ -175,6 +178,18 @@ func (p *PullRequest) GetLastStartedCIBuilds() map[string]*jenkins.Build {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return maps.Clone(p.lastStartedCIBuilds)
+}
+
+func (p *PullRequest) SetCITriggeredCommit(commit string) {
+	p.lock.Lock()
+	p.ciTriggeredCommit = commit
+	p.lock.Unlock()
+}
+
+func (p *PullRequest) GetCITriggeredCommit() string {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	return p.ciTriggeredCommit
 }
 
 // Assignees returns the GitHub logins of the users assigned to the PR.

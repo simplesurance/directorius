@@ -1985,3 +1985,103 @@ func TestSuccessfulStatusStateIsOnlySetOnce(t *testing.T) {
 
 	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
 }
+
+// newLostSyncEventAutoupdater returns an autoupdater whose first UpdateBranch
+// call changes the branch and whose required CI job never reports a status.
+func newLostSyncEventAutoupdater(t *testing.T, prNumber int) (*Coordinator, chan *github_prov.Event, *atomic.Uint32) {
+	t.Helper()
+
+	evChan := make(chan *github_prov.Event, 1)
+	t.Cleanup(func() { close(evChan) })
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
+
+	var updateBranchCalls atomic.Uint32
+	ghClient.
+		EXPECT().
+		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
+		DoAndReturn(func(context.Context, string, string, int) (*githubclt.UpdateBranchResult, error) {
+			return &githubclt.UpdateBranchResult{
+				Changed:      updateBranchCalls.Add(1) == 1,
+				HeadCommitID: dryGitHubClientHeadCommitID,
+			}, nil
+		}).AnyTimes()
+
+	mockReadyForMergeStatus(
+		ghClient, prNumber,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
+	).AnyTimes()
+	mockCreateCommitStatusSuccessful(ghClient).AnyTimes()
+	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
+	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
+	ciBuildCalls := mockCIBuildWithCallCnt(ciClient)
+	mockGetBuildFromQueueItemID(ciClient).AnyTimes()
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+	autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+		ciJobExpectedName: {RelURL: "here"},
+	}
+
+	return autoupdater, evChan, ciBuildCalls
+}
+
+func TestCIJobsTriggeredOnceByPeriodicRunWhenSyncEventIsLost(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	prNumber := 1
+	prBranch := "pr_branch"
+	baseBranch := "main"
+
+	autoupdater, evChan, ciBuildCalls := newLostSyncEventAutoupdater(t, prNumber)
+	autoupdater.periodicTriggerIntv = 10 * time.Millisecond
+	autoupdater.Start()
+	t.Cleanup(autoupdater.Stop)
+
+	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 1)
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	require.NotNil(t, queue)
+
+	// no synchronize event is sent for the branch update
+	waitForCiBuildCallsEqual(t, ciBuildCalls, 1)
+
+	runs := queue.getProcessPRRuns()
+	waitForQueueUpdateRunsGreaterThan(t, queue, runs+3)
+	assert.EqualValues(t, 1, ciBuildCalls.Load(), "ci jobs triggered more than once for the same head commit")
+}
+
+func TestCIJobsNotTriggeredAgainBySyncEventForSameCommit(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	prNumber := 1
+	prBranch := "pr_branch"
+	baseBranch := "main"
+
+	autoupdater, evChan, ciBuildCalls := newLostSyncEventAutoupdater(t, prNumber)
+	autoupdater.Start()
+	t.Cleanup(autoupdater.Stop)
+
+	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 1)
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	require.NotNil(t, queue)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
+
+	// a run that is not TaskTriggerCI, like the periodic one, processes
+	// the head before its synchronize event arrives
+	queue.ScheduleProcessPR(context.Background(), TaskNone)
+	waitForCiBuildCallsEqual(t, ciBuildCalls, 1)
+
+	evChan <- &github_prov.Event{Event: newSyncEvent(prNumber, prBranch, baseBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 2)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 2)
+	assert.EqualValues(t, 1, ciBuildCalls.Load(), "synchronize event triggered ci jobs again for the same head commit")
+}

@@ -20,7 +20,7 @@ import (
 	"github.com/simplesurance/directorius/internal/set"
 )
 
-const defPeriodicTriggerInterval = 30 * time.Minute
+const defPeriodicTriggerInterval = 5 * time.Minute
 
 type GithubClient interface {
 	AddLabel(ctx context.Context, owner, repo string, pullRequestOrIssueNumber int, label string) error
