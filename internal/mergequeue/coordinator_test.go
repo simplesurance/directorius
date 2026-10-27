@@ -2162,3 +2162,44 @@ func TestCIJobsRetriedWhenTriggerFails(t *testing.T) {
 	waitForQueueUpdateRunsGreaterThan(t, queue, 2)
 	assert.EqualValues(t, 2, ciBuildCalls.Load(), "CI jobs must not be triggered again after succeeding")
 }
+
+func TestCheckRunEventUpdatesStaleTimestampAndHandlesMissingBaseBranch(t *testing.T) {
+	l := forwardLogsToTestLogger(t)
+
+	evChan := make(chan *github_prov.Event, 1)
+	t.Cleanup(func() { close(evChan) })
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+
+	bb, err := NewBaseBranch(repoOwner, repo, "master")
+	require.NoError(t, err)
+
+	pr, err := NewPullRequest(1, "pr_branch1", "me", "test pr", "")
+	require.NoError(t, err)
+	initialTime := time.Now().Add(-time.Hour)
+	pr.SetStateUnchangedSince(initialTime)
+
+	q := newQueue(bb, l, ghClient, retry.NewRetryer(), autoupdater.CI, queueHeadLabel)
+	t.Cleanup(q.Stop)
+	_, added := q.active.InsertIfNotExist(pr.Number, pr)
+	require.True(t, added)
+	autoupdater.queues[bb.BranchID] = q
+
+	ev := newCheckRunEvent("stale", "", "pr_branch1")
+	ev.CheckRun.PullRequests = append(ev.CheckRun.PullRequests, newBasicPullRequest(2, "", "pr_branch2"))
+
+	require.NotPanics(t, func() {
+		autoupdater.processCheckRunEvent(context.Background(), l, ev)
+	})
+	assert.True(t, pr.GetStateUnchangedSince().After(initialTime), "expected check_run event to update stateUnchangedSince timestamp")
+}

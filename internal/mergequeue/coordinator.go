@@ -777,31 +777,32 @@ func (a *Coordinator) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 		baseBranch := pr.GetBase().GetRef()
 		prNumber := pr.GetNumber()
 
-		logger = logger.With(
+		prLogger := logger.With(
 			logfields.BaseBranch(baseBranch),
 			logfields.PullRequest(prNumber),
 		)
 
 		bb, err := NewBaseBranch(owner, repo, baseBranch)
 		if err != nil {
-			logger.Warn(
+			prLogger.Warn(
 				"ignoring check run event for pull-request, incomplete base branch information",
 				zap.Error(err),
 			)
+			continue
+		}
 
-			err := a.SetPRStaleSinceIfNewer(ctx, bb, pr.GetNumber(), time.Now())
-			if err != nil {
-				if errors.Is(err, ErrNotFound) {
-					logger.Debug(
-						"pr not queued, can not update stale timestamp",
-					)
-					continue
-				}
-				logger.Error(
-					"updating stale timestamp failed",
-					zap.Error(err),
+		err = a.SetPRStaleSinceIfNewer(ctx, bb, prNumber, time.Now())
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				prLogger.Debug(
+					"pr not queued, can not update stale timestamp",
 				)
+				continue
 			}
+			prLogger.Error(
+				"updating stale timestamp failed",
+				zap.Error(err),
+			)
 		}
 	}
 
