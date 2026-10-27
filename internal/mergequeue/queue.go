@@ -548,14 +548,18 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 
 	actions, err := q.evalPRAction(ctx, logger, pr)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			logger.Debug(
+				"evaluating status of first pull request in the queue canceled",
+				zap.Error(err),
+			)
+			return
+		}
+
 		logger.Error(
 			"evaluating status of first pull request in the queue failed",
 			zap.Error(err),
 		)
-
-		if errors.Is(err, context.Canceled) {
-			return
-		}
 
 		if err := q.suspend(pr.Number); err != nil {
 			logger.Error("suspending PR failed", zap.Error(err))
