@@ -2257,3 +2257,90 @@ func TestSetPRStaleSinceIfNewerByBranchMultipleQueues(t *testing.T) {
 	assert.Equal(t, updatedAt, pr1.GetStateUnchangedSince())
 	assert.Equal(t, updatedAt, pr2.GetStateUnchangedSince())
 }
+
+func TestInitialSyncPreservesQueueHeadAndOrdersByNumber(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	evChan := make(chan *github_prov.Event, 1)
+	defer close(evChan)
+
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
+
+	mockSuccessfulGithubUpdateBranchCall(ghClient, 30, false).AnyTimes()
+	mockReadyForMergeStatus(
+		ghClient, 30,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
+	).AnyTimes()
+	mockCreateCommitStatusSuccessful(ghClient).Times(1)
+	ciClient.
+		EXPECT().
+		Build(gomock.Any(), gomock.Any()).
+		AnyTimes()
+	mockGetBuildFromQueueItemID(ciClient).AnyTimes()
+
+	// Simulate paginated updated-asc results where PR 20 is yielded on page 1,
+	// PR 10 on page 2, and PR 30 (the previous queue head carrying queueHeadLabel)
+	// on the last page.
+	syncPRRequestsRet := []*githubclt.PR{
+		{
+			Number:           20,
+			AutoMergeEnabled: true,
+			Branch:           "pr20",
+			BaseBranch:       "main",
+		},
+		{
+			Number:           10,
+			AutoMergeEnabled: true,
+			Branch:           "pr10",
+			BaseBranch:       "main",
+		},
+		{
+			Number:           30,
+			AutoMergeEnabled: true,
+			Branch:           "pr30",
+			BaseBranch:       "main",
+			Labels:           []string{queueHeadLabel},
+		},
+	}
+
+	ghClient.
+		EXPECT().
+		ListPRs(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo)).
+		Return(
+			func(yield func(*githubclt.PR, error) bool) {
+				for _, item := range syncPRRequestsRet {
+					if !yield(item, nil) {
+						return
+					}
+				}
+			},
+		).Times(1)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+	autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+		ciJobExpectedName: {RelURL: "here"},
+	}
+
+	err := autoupdater.InitSync(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(autoupdater.Stop)
+
+	q := autoupdater.getQueue(&BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "main"})
+	require.NotNil(t, q)
+	waitForQueueUpdateRunsGreaterThan(t, q, 0)
+
+	activePRs, _ := q.asSlices()
+	require.Len(t, activePRs, 3)
+	assert.Equal(t, 30, activePRs[0].Number, "PR carrying head label before sync must remain at queue head")
+	assert.Equal(t, 10, activePRs[1].Number, "remaining PRs must be ordered by ascending PR number")
+	assert.Equal(t, 20, activePRs[2].Number, "remaining PRs must be ordered by ascending PR number")
+}
