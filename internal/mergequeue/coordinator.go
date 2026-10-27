@@ -168,7 +168,13 @@ func (a *Coordinator) eventLoop() {
 
 		case <-periodicTrigger.C:
 			a.queuesLock.Lock()
-			for _, q := range a.queues {
+			for branchID, q := range a.queues {
+				if q.IsEmpty() {
+					q.Wait()
+					delete(a.queues, branchID)
+					a.Logger.With(q.baseBranch.Logfields...).Debug("removed empty queue for base branch")
+					continue
+				}
 				q.ScheduleProcessPR(context.Background(), TaskNone)
 				a.Logger.Debug("periodic run scheduled", q.baseBranch.Logfields...)
 			}
@@ -768,7 +774,7 @@ func (a *Coordinator) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 	logger.Debug("event received")
 
 	if len(branches) == 0 {
-		logger.Info("ignoring event, pull request or branches fields is empty")
+		logger.Debug("ignoring event, pull request or branches fields is empty")
 
 		return
 	}
@@ -777,31 +783,32 @@ func (a *Coordinator) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 		baseBranch := pr.GetBase().GetRef()
 		prNumber := pr.GetNumber()
 
-		logger = logger.With(
+		prLogger := logger.With(
 			logfields.BaseBranch(baseBranch),
 			logfields.PullRequest(prNumber),
 		)
 
 		bb, err := NewBaseBranch(owner, repo, baseBranch)
 		if err != nil {
-			logger.Warn(
+			prLogger.Warn(
 				"ignoring check run event for pull-request, incomplete base branch information",
 				zap.Error(err),
 			)
+			continue
+		}
 
-			err := a.SetPRStaleSinceIfNewer(ctx, bb, pr.GetNumber(), time.Now())
-			if err != nil {
-				if errors.Is(err, ErrNotFound) {
-					logger.Debug(
-						"pr not queued, can not update stale timestamp",
-					)
-					continue
-				}
-				logger.Error(
-					"updating stale timestamp failed",
-					zap.Error(err),
+		err = a.SetPRStaleSinceIfNewer(ctx, bb, prNumber, time.Now())
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				prLogger.Debug(
+					"pr not queued, can not update stale timestamp",
 				)
+				continue
 			}
+			prLogger.Error(
+				"updating stale timestamp failed",
+				zap.Error(err),
+			)
 		}
 	}
 
@@ -848,7 +855,7 @@ func (a *Coordinator) processStatusEvent(ctx context.Context, logger *zap.Logger
 	logger.Debug("event received")
 
 	if len(branches) == 0 {
-		logger.Info("ignorning event, pull request or branches field is empty")
+		logger.Debug("ignoring event, pull request or branches field is empty")
 
 		return
 	}
@@ -948,10 +955,13 @@ func (a *Coordinator) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 
 	pr, err := q.Dequeue(prNumber, setPendingStatusState)
 	if err != nil {
+		if q.IsEmpty() {
+			q.Wait()
+			delete(a.queues, baseBranch.BranchID)
+			a.Logger.With(baseBranch.Logfields...).Debug("removed empty queue for base branch")
+		}
 		return nil, fmt.Errorf("removing pr from merge queue failed: %w", err)
 	}
-
-	metrics.DequeueOpsInc(&baseBranch.BranchID)
 
 	if q.IsEmpty() {
 		q.Wait()
@@ -985,7 +995,12 @@ func (a *Coordinator) SetPRStaleSinceIfNewerByBranch(
 			continue
 		}
 
-		missing = q.SetPRStaleSinceIfNewerByBranch(branchNames, updatedAt)
+		notFoundInQueue := q.SetPRStaleSinceIfNewerByBranch(branchNames, updatedAt)
+		for b := range missing {
+			if !notFoundInQueue.Contains(b) {
+				delete(missing, b)
+			}
+		}
 	}
 
 	return missing.Slice()

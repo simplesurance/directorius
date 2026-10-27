@@ -51,6 +51,9 @@ func (a *Coordinator) httpListData() *pagestypes.ListData {
 		}
 
 		activePRs, suspendedPRs := queue.asSlices()
+		if len(activePRs) == 0 && len(suspendedPRs) == 0 {
+			continue
+		}
 
 		// sort them PRs to show list in a stable order in the UI
 		slices.SortFunc(suspendedPRs, orderBefore)

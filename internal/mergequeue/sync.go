@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -22,13 +23,23 @@ const (
 	resetStatusState
 )
 
+type syncItem struct {
+	ghPR    *githubclt.PR
+	actions []syncAction
+}
+
+func (s syncItem) isQueuedHead() bool {
+	return slices.Contains(s.actions, enqueue) && slices.Contains(s.actions, unlabel)
+}
+
 // InitSync does an initial synchronization of the autoupdater queues with the
 // pull request state at GitHub.
 // It must be run **before** Autoupdater is started.
 // Pull request information is queried from github.
 // If a PR meets a condition to be enqueued for auto-updates it is enqueued.
 // If it meets a condition for not being automatically updated, it is dequeued.
-// If a PR has the [a.HeadLabel] it is removed, if it has a non-pending github
+// A PR that has [a.HeadLabel] and is enqueued is placed at the head of its
+// queue; otherwise [a.HeadLabel] is removed. If a PR has a non-pending github
 // status from directorius it is set to pending.
 func (a *Coordinator) InitSync(ctx context.Context) error {
 	for repo := range a.MonitoredRepositories {
@@ -52,6 +63,7 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 	defer stop()
 
 	stats := syncStat{StartTime: time.Now()}
+	var items []syncItem
 	hasMore := true
 	for {
 		var ghPR *githubclt.PR
@@ -71,24 +83,54 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 		stats.Seen++
 
 		actions := a.evaluateActions(ghPR)
-		if len(actions) > 0 {
-			stats.PRsOutOfSync++
+		if len(actions) == 0 {
+			continue
 		}
 
-		for _, action := range actions {
-			pr, err := NewPullRequest(ghPR.Number, ghPR.Branch, ghPR.Author, ghPR.Title, ghPR.Link)
-			if err != nil {
-				return fmt.Errorf("pr information retrieved from github is incomplete: %w", err)
+		stats.PRsOutOfSync++
+		items = append(items, syncItem{ghPR: ghPR, actions: actions})
+	}
+
+	slices.SortStableFunc(items, func(x, y syncItem) int {
+		xHead := x.isQueuedHead()
+		yHead := y.isQueuedHead()
+		if xHead != yHead {
+			if xHead {
+				return -1
 			}
-			pr.SetAssignees(ghPR.Assignees)
+			return 1
+		}
 
-			logger = logger.With(pr.LogFields...)
+		return 0
+	})
 
+	headPreserved := map[string]bool{}
+
+	for _, item := range items {
+		ghPR := item.ghPR
+
+		pr, err := NewPullRequest(ghPR.Number, ghPR.Branch, ghPR.Author, ghPR.Title, ghPR.Link)
+		if err != nil {
+			return fmt.Errorf("pr information retrieved from github is incomplete: %w", err)
+		}
+		pr.SetAssignees(ghPR.Assignees)
+
+		preserveHeadLabel := item.isQueuedHead() && !headPreserved[ghPR.BaseBranch]
+		if preserveHeadLabel {
+			pr.hasHeadLabel = true
+		}
+
+		prLogger := logger.With(pr.LogFields...)
+
+		for _, action := range item.actions {
 			switch action {
 			case unlabel:
+				if preserveHeadLabel {
+					continue
+				}
 				err := a.removeLabel(ctx, owner, repo, pr)
 				if err != nil {
-					logger.Warn(
+					prLogger.Warn(
 						"removing pull request label failed",
 						zap.Error(err),
 					)
@@ -99,19 +141,37 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 			case enqueue:
 				err := a.enqueuePR(ctx, owner, repo, ghPR.BaseBranch, pr)
 				if errors.Is(err, ErrAlreadyExists) {
-					logger.Debug("queue in-sync, pr is already enqueued")
+					if preserveHeadLabel {
+						headPreserved[ghPR.BaseBranch] = true
+					}
+					prLogger.Debug("queue in-sync, pr is already enqueued")
 					break
 				}
 				if err != nil {
 					stats.Failures++
-					logger.Warn("adding pr to queue failed",
+					prLogger.Warn("adding pr to queue failed",
 						zap.Error(err),
 					)
+					if preserveHeadLabel {
+						preserveHeadLabel = false
+						pr.hasHeadLabel = false
+						if rmErr := a.removeLabel(ctx, owner, repo, pr); rmErr != nil {
+							prLogger.Warn(
+								"removing pull request label failed",
+								zap.Error(rmErr),
+							)
+						} else {
+							stats.Unlabeled++
+						}
+					}
 					break
 				}
 
+				if preserveHeadLabel {
+					headPreserved[ghPR.BaseBranch] = true
+				}
 				stats.Enqueued++
-				logger.Info("enqueued pr")
+				prLogger.Info("enqueued pr")
 
 			case resetStatusState:
 				err := createCommitStatus(ctx,
@@ -120,14 +180,14 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 					githubclt.StatusStatePending,
 				)
 				if err != nil {
-					logger.Warn("setting github status state failed", zap.Error(err))
+					prLogger.Warn("setting github status state failed", zap.Error(err))
 					continue
 				}
 
 				stats.StatusStateReset++
 
 			default:
-				logger.DPanic(
+				prLogger.DPanic(
 					"evaluateActions() returned unexpected value",
 					zap.Int("value", int(action)),
 				)

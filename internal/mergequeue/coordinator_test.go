@@ -1884,7 +1884,7 @@ func TestPauseResumeQueue(t *testing.T) {
 	require.NoError(t, err)
 
 	mockSuccessfulGithubUpdateBranchCall(ghClient, pr.Number, false).Times(4)
-	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr.Number).Times(4)
+	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr.Number).Times(1)
 	mockReadyForMergeStatus(
 		ghClient, pr.Number,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
@@ -2161,4 +2161,183 @@ func TestCIJobsRetriedWhenTriggerFails(t *testing.T) {
 	queue.ScheduleProcessPR(context.Background(), TaskNone)
 	waitForQueueUpdateRunsGreaterThan(t, queue, 2)
 	assert.EqualValues(t, 2, ciBuildCalls.Load(), "CI jobs must not be triggered again after succeeding")
+}
+
+func TestCheckRunEventUpdatesStaleTimestampAndHandlesMissingBaseBranch(t *testing.T) {
+	l := forwardLogsToTestLogger(t)
+
+	evChan := make(chan *github_prov.Event, 1)
+	t.Cleanup(func() { close(evChan) })
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+
+	bb, err := NewBaseBranch(repoOwner, repo, "master")
+	require.NoError(t, err)
+
+	pr, err := NewPullRequest(1, "pr_branch1", "me", "test pr", "")
+	require.NoError(t, err)
+	initialTime := time.Now().Add(-time.Hour)
+	pr.SetStateUnchangedSince(initialTime)
+
+	q := newQueue(bb, l, ghClient, retry.NewRetryer(), autoupdater.CI, queueHeadLabel)
+	t.Cleanup(q.Stop)
+	_, added := q.active.InsertIfNotExist(pr.Number, pr)
+	require.True(t, added)
+	autoupdater.queues[bb.BranchID] = q
+
+	ev := newCheckRunEvent("stale", "", "pr_branch1")
+	ev.CheckRun.PullRequests = append(ev.CheckRun.PullRequests, newBasicPullRequest(2, "", "pr_branch2"))
+
+	require.NotPanics(t, func() {
+		autoupdater.processCheckRunEvent(context.Background(), l, ev)
+	})
+	assert.True(t, pr.GetStateUnchangedSince().After(initialTime), "expected check_run event to update stateUnchangedSince timestamp")
+}
+
+func TestSetPRStaleSinceIfNewerByBranchMultipleQueues(t *testing.T) {
+	l := forwardLogsToTestLogger(t)
+
+	evChan := make(chan *github_prov.Event, 1)
+	t.Cleanup(func() { close(evChan) })
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+
+	bbMaster, err := NewBaseBranch(repoOwner, repo, "master")
+	require.NoError(t, err)
+	bbRelease, err := NewBaseBranch(repoOwner, repo, "release")
+	require.NoError(t, err)
+
+	pr1, err := NewPullRequest(1, "pr_branch1", "me", "test pr 1", "")
+	require.NoError(t, err)
+	pr2, err := NewPullRequest(2, "pr_branch2", "me", "test pr 2", "")
+	require.NoError(t, err)
+
+	qMaster := newQueue(bbMaster, l, ghClient, retry.NewRetryer(), autoupdater.CI, queueHeadLabel)
+	t.Cleanup(qMaster.Stop)
+	_, added := qMaster.active.InsertIfNotExist(pr1.Number, pr1)
+	require.True(t, added)
+	autoupdater.queues[bbMaster.BranchID] = qMaster
+
+	qRelease := newQueue(bbRelease, l, ghClient, retry.NewRetryer(), autoupdater.CI, queueHeadLabel)
+	t.Cleanup(qRelease.Stop)
+	_, added = qRelease.active.InsertIfNotExist(pr2.Number, pr2)
+	require.True(t, added)
+	autoupdater.queues[bbRelease.BranchID] = qRelease
+
+	updatedAt := time.Now().Add(time.Minute)
+	notFound := autoupdater.SetPRStaleSinceIfNewerByBranch(
+		context.Background(),
+		repoOwner,
+		repo,
+		[]string{"pr_branch1", "pr_branch2", "unqueued_branch"},
+		updatedAt,
+	)
+
+	assert.Equal(t, []string{"unqueued_branch"}, notFound)
+	assert.Equal(t, updatedAt, pr1.GetStateUnchangedSince())
+	assert.Equal(t, updatedAt, pr2.GetStateUnchangedSince())
+}
+
+func TestInitialSyncPreservesQueueHeadAndOrdersByNumber(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	evChan := make(chan *github_prov.Event, 1)
+	defer close(evChan)
+
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
+
+	mockSuccessfulGithubUpdateBranchCall(ghClient, 30, false).AnyTimes()
+	mockReadyForMergeStatus(
+		ghClient, 30,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
+	).AnyTimes()
+	mockCreateCommitStatusSuccessful(ghClient).Times(1)
+	ciClient.
+		EXPECT().
+		Build(gomock.Any(), gomock.Any()).
+		AnyTimes()
+	mockGetBuildFromQueueItemID(ciClient).AnyTimes()
+
+	syncPRRequestsRet := []*githubclt.PR{
+		{
+			Number:           10,
+			AutoMergeEnabled: true,
+			Branch:           "pr10",
+			BaseBranch:       "main",
+		},
+		{
+			Number:           20,
+			AutoMergeEnabled: true,
+			Branch:           "pr20",
+			BaseBranch:       "main",
+		},
+		{
+			Number:           30,
+			AutoMergeEnabled: true,
+			Branch:           "pr30",
+			BaseBranch:       "main",
+			Labels:           []string{queueHeadLabel},
+		},
+	}
+
+	ghClient.
+		EXPECT().
+		ListPRs(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo)).
+		Return(
+			func(yield func(*githubclt.PR, error) bool) {
+				for _, item := range syncPRRequestsRet {
+					if !yield(item, nil) {
+						return
+					}
+				}
+			},
+		).Times(1)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+	autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+		ciJobExpectedName: {RelURL: "here"},
+	}
+
+	err := autoupdater.InitSync(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(autoupdater.Stop)
+
+	q := autoupdater.getQueue(&BranchID{Repository: repo, RepositoryOwner: repoOwner, Branch: "main"})
+	require.NotNil(t, q)
+	waitForQueueUpdateRunsGreaterThan(t, q, 0)
+
+	activePRs, _ := q.asSlices()
+	require.Len(t, activePRs, 3)
+	assert.Equal(t, 30, activePRs[0].Number, "PR carrying head label before sync must remain at queue head")
+	assert.Equal(t, 10, activePRs[1].Number, "remaining PRs must be ordered by ascending PR number")
+	assert.Equal(t, 20, activePRs[2].Number, "remaining PRs must be ordered by ascending PR number")
 }

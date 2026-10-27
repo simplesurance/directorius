@@ -312,6 +312,7 @@ func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest,
 		logger.Debug("pull request removed from suspend queue")
 
 		pr.SetStateUnchangedSince(time.Time{})
+		metrics.DequeueOpsInc(&q.baseBranch.BranchID)
 
 		return pr, nil
 	} else if !errors.Is(err, ErrNotFound) {
@@ -325,6 +326,7 @@ func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest,
 		return nil, ErrNotFound
 	}
 
+	metrics.DequeueOpsInc(&q.baseBranch.BranchID)
 	q.cancelActionForPR(prNumber)
 	removed.SetStateUnchangedSince(time.Time{})
 
@@ -548,14 +550,18 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 
 	actions, err := q.evalPRAction(ctx, logger, pr)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			logger.Debug(
+				"evaluating status of first pull request in the queue canceled",
+				zap.Error(err),
+			)
+			return
+		}
+
 		logger.Error(
 			"evaluating status of first pull request in the queue failed",
 			zap.Error(err),
 		)
-
-		if errors.Is(err, context.Canceled) {
-			return
-		}
 
 		if err := q.suspend(pr.Number); err != nil {
 			logger.Error("suspending PR failed", zap.Error(err))
@@ -579,12 +585,22 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 			pr.SetStateUnchangedSinceIfNewer(time.Now())
 
 		case ActionSuspend:
+			// q.suspend calls q.cancelActionForPR, which cancels ctx.
 			if err := q.suspend(pr.Number); err != nil {
 				logger.Error("suspending PR failed", zap.Error(err))
 				continue
 			}
 
 			logger.Info("pull request suspended", logfields.Reason(reason))
+
+		case ActionDequeue:
+			// q.Dequeue calls q.cancelActionForPR, which cancels ctx.
+			if _, err := q.Dequeue(pr.Number, false); err != nil {
+				logger.Error("dequeuing PR failed", zap.Error(err))
+				continue
+			}
+
+			logger.Info("pull request removed from merge queue", logfields.Reason(reason))
 
 		case ActionCreatePullRequestComment:
 			// use a shorter timeout to prevent that this optional operation blocks for long
@@ -756,6 +772,15 @@ func (q *queue) prsByBranch(branchNames set.Set[string]) (
 }
 
 func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
+	pr.headLabelLock.Lock()
+	defer pr.headLabelLock.Unlock()
+
+	if pr.hasHeadLabel {
+		q.logger.Debug("skipping adding queue head label, label was already added",
+			logfields.NewWith(pr.LogFields, zap.String("github_label", q.headLabel))...)
+		return
+	}
+
 	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
 	defer cancelFunc()
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
@@ -775,13 +800,21 @@ func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
 				zap.Error(err),
 				zap.String("github_label", q.headLabel),
 			)...)
+		return
 	}
+
+	pr.hasHeadLabel = true
 
 	q.logger.Info("queue head label was added to pr",
 		logfields.NewWith(pr.LogFields, zap.String("github_label", q.headLabel))...)
 }
 
 func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr *PullRequest) {
+	pr.headLabelLock.Lock()
+	defer pr.headLabelLock.Unlock()
+
+	pr.hasHeadLabel = false
+
 	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
 	defer cancelFunc()
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
@@ -798,6 +831,7 @@ func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr
 				zap.String("github_label", q.headLabel),
 				logfields.Reason(logReason),
 			}, pr.LogFields...)...)
+		return
 	}
 	q.logger.Info("queue head label was removed from pr",
 		append([]zapcore.Field{

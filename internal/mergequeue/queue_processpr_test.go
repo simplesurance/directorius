@@ -191,6 +191,19 @@ func TestEvalPRAction_PendingCIJobs(t *testing.T) {
 	assert.Contains(t, reqActions.Actions, ActionCreateSuccessfulGithubStatus)
 }
 
+func TestEvalPRAction_DequeueActionOnClosedPR(t *testing.T) {
+	prt := initEvalPRActionTest(t)
+	prt.GhClt.EXPECT().
+		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(prNR)).
+		Return(nil, githubclt.ErrPullRequestIsClosed).
+		Times(1)
+
+	reqActions, err := prt.Q.evalPRAction(context.Background(), prt.L, prt.PR)
+	require.NoError(t, err)
+	require.NotNil(t, reqActions)
+	require.Equal(t, []Action{ActionDequeue}, reqActions.Actions)
+}
+
 func TestCITriggerNeeded(t *testing.T) {
 	tcs := []struct {
 		name            string
