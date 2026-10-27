@@ -765,6 +765,15 @@ func (q *queue) prsByBranch(branchNames set.Set[string]) (
 }
 
 func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
+	pr.headLabelLock.Lock()
+	defer pr.headLabelLock.Unlock()
+
+	if pr.hasHeadLabel {
+		q.logger.Debug("skipping adding queue head label, label was already added",
+			logfields.NewWith(pr.LogFields, zap.String("github_label", q.headLabel))...)
+		return
+	}
+
 	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
 	defer cancelFunc()
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
@@ -784,13 +793,21 @@ func (q *queue) prAddQueueHeadLabel(ctx context.Context, pr *PullRequest) {
 				zap.Error(err),
 				zap.String("github_label", q.headLabel),
 			)...)
+		return
 	}
+
+	pr.hasHeadLabel = true
 
 	q.logger.Info("queue head label was added to pr",
 		logfields.NewWith(pr.LogFields, zap.String("github_label", q.headLabel))...)
 }
 
 func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr *PullRequest) {
+	pr.headLabelLock.Lock()
+	defer pr.headLabelLock.Unlock()
+
+	pr.hasHeadLabel = false
+
 	ctx, cancelFunc := context.WithTimeout(ctx, operationTimeout)
 	defer cancelFunc()
 	err := q.retryer.Run(ctx, func(ctx context.Context) error {
@@ -807,6 +824,7 @@ func (q *queue) prRemoveQueueHeadLabel(ctx context.Context, logReason string, pr
 				zap.String("github_label", q.headLabel),
 				logfields.Reason(logReason),
 			}, pr.LogFields...)...)
+		return
 	}
 	q.logger.Info("queue head label was removed from pr",
 		append([]zapcore.Field{

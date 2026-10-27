@@ -1884,7 +1884,7 @@ func TestPauseResumeQueue(t *testing.T) {
 	require.NoError(t, err)
 
 	mockSuccessfulGithubUpdateBranchCall(ghClient, pr.Number, false).Times(4)
-	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr.Number).Times(4)
+	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, pr.Number).Times(1)
 	mockReadyForMergeStatus(
 		ghClient, pr.Number,
 		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,

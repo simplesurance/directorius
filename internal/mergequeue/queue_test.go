@@ -1,7 +1,9 @@
 package mergequeue
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 
 	"github.com/simplesurance/directorius/internal/githubclt"
@@ -256,4 +259,71 @@ func TestOrderBefore_OlderEnqueuedAtTimeFirst(t *testing.T) {
 	pr2.EnqueuedAt = time.Now().Add(-30 * time.Minute)
 
 	require.Equal(t, 1, orderBefore(pr1, pr2))
+}
+
+func TestQueueHeadLabelAddedOnlyOnceAndRetriedOnError(t *testing.T) {
+	var logBuf bytes.Buffer
+	core := zapcore.NewCore(
+		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
+		zapcore.AddSync(&logBuf),
+		zapcore.InfoLevel,
+	)
+	logger := zap.New(core)
+
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+
+	bb, err := NewBaseBranch(repoOwner, repo, "main")
+	require.NoError(t, err)
+	q := newQueue(bb, logger, ghClient, retry.NewRetryer(), nil, queueHeadLabel)
+	t.Cleanup(q.Stop)
+
+	pr, err := NewPullRequest(prNR, prBranch, "fho", "test pr", "")
+	require.NoError(t, err)
+
+	gomock.InOrder(
+		ghClient.EXPECT().
+			AddLabel(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(pr.Number), gomock.Eq(queueHeadLabel)).
+			Return(errors.New("transient github error")).
+			Times(1),
+		ghClient.EXPECT().
+			AddLabel(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(pr.Number), gomock.Eq(queueHeadLabel)).
+			Return(nil).
+			Times(1),
+		ghClient.EXPECT().
+			RemoveLabel(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(pr.Number), gomock.Eq(queueHeadLabel)).
+			Return(errors.New("transient remove error")).
+			Times(1),
+		ghClient.EXPECT().
+			AddLabel(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(pr.Number), gomock.Eq(queueHeadLabel)).
+			Return(nil).
+			Times(1),
+	)
+
+	// 1. First attempt fails: should log Warn and NOT log "queue head label was added to pr".
+	q.prAddQueueHeadLabel(context.Background(), pr)
+	assert.Contains(t, logBuf.String(), "adding label to PR failed")
+	assert.NotContains(t, logBuf.String(), "queue head label was added to pr")
+	logBuf.Reset()
+
+	// 2. Second attempt succeeds: should call AddLabel and log Info once.
+	q.prAddQueueHeadLabel(context.Background(), pr)
+	assert.Contains(t, logBuf.String(), "queue head label was added to pr")
+	logBuf.Reset()
+
+	// 3. Third call while label is already set: should skip calling GitHub AddLabel.
+	q.prAddQueueHeadLabel(context.Background(), pr)
+	assert.NotContains(t, logBuf.String(), "queue head label was added to pr")
+	logBuf.Reset()
+
+	// 4. RemoveLabel fails: should log Warn, NOT log "queue head label was removed from pr",
+	// and reset hasHeadLabel so a subsequent AddLabel is not skipped.
+	q.prRemoveQueueHeadLabel(context.Background(), "dequeue", pr)
+	assert.Contains(t, logBuf.String(), "removing label from PR failed")
+	assert.NotContains(t, logBuf.String(), "queue head label was removed from pr")
+	logBuf.Reset()
+
+	// 5. Subsequent AddLabel after removal calls GitHub again.
+	q.prAddQueueHeadLabel(context.Background(), pr)
+	assert.Contains(t, logBuf.String(), "queue head label was added to pr")
 }

@@ -52,6 +52,9 @@ type PullRequest struct {
 
 	GithubStatusLastSetState ReportedStatusState
 	GithubStatusLock         sync.Mutex
+
+	hasHeadLabel  bool
+	headLabelLock sync.Mutex
 }
 
 type ReportedStatusState struct {
