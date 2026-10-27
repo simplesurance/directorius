@@ -617,7 +617,6 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 				continue
 			}
 
-			pr.SetCITriggeredCommit(actions.HeadCommitID)
 			err := q.ci.Run(ctx, pr, actions.ExpectedCIRuns...)
 			if err != nil {
 				logger.Error("triggering CI jobs failed",
@@ -625,6 +624,7 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 				)
 				return
 			}
+			pr.SetCITriggeredCommit(actions.HeadCommitID)
 			logger.Info("ci jobs triggered", logfields.Reason(reason))
 			pr.SetStateUnchangedSinceIfNewer(time.Now())
 

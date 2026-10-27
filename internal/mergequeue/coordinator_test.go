@@ -2085,3 +2085,79 @@ func TestCIJobsNotTriggeredAgainBySyncEventForSameCommit(t *testing.T) {
 	waitForQueueUpdateRunsGreaterThan(t, queue, 2)
 	assert.EqualValues(t, 1, ciBuildCalls.Load(), "synchronize event triggered ci jobs again for the same head commit")
 }
+
+func TestCIJobsRetriedWhenTriggerFails(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	prNumber := 1
+	prBranch := "pr_branch"
+	baseBranch := "main"
+
+	evChan := make(chan *github_prov.Event, 1)
+	t.Cleanup(func() { close(evChan) })
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
+
+	ghClient.
+		EXPECT().
+		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Any()).
+		Return(&githubclt.UpdateBranchResult{
+			Changed:      false,
+			HeadCommitID: dryGitHubClientHeadCommitID,
+		}, nil).
+		AnyTimes()
+
+	mockReadyForMergeStatus(
+		ghClient, prNumber,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusExpected,
+	).AnyTimes()
+	mockCreateCommitStatusSuccessful(ghClient).AnyTimes()
+	mockSuccessfulGithubAddLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
+	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, prNumber).AnyTimes()
+
+	var ciBuildCalls atomic.Uint32
+	ciClient.
+		EXPECT().
+		Build(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *jenkins.Job) (int64, error) {
+			if ciBuildCalls.Add(1) == 1 {
+				return 0, errors.New("jenkins unavailable")
+			}
+			return 1, nil
+		}).
+		AnyTimes()
+	mockGetBuildFromQueueItemID(ciClient).AnyTimes()
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+	autoupdater.CI.Jobs = map[string]*jenkins.JobTemplate{
+		ciJobExpectedName: {RelURL: "here"},
+	}
+
+	autoupdater.Start()
+	t.Cleanup(autoupdater.Stop)
+
+	evChan <- &github_prov.Event{Event: newPullRequestAutomergeEnabledEvent(prNumber, prBranch, baseBranch)}
+	waitForProcessedEventCnt(t, autoupdater, 1)
+	queue := autoupdater.getQueue(&BranchID{RepositoryOwner: repoOwner, Repository: repo, Branch: baseBranch})
+	require.NotNil(t, queue)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 0)
+	require.EqualValues(t, 1, ciBuildCalls.Load(), "first run should attempt to trigger CI")
+
+	// Second run retries CI trigger because the first attempt failed.
+	queue.ScheduleProcessPR(context.Background(), TaskNone)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 1)
+	require.EqualValues(t, 2, ciBuildCalls.Load(), "failed CI trigger must be retried on subsequent run")
+
+	// Third run does not re-trigger CI because the second attempt succeeded.
+	queue.ScheduleProcessPR(context.Background(), TaskNone)
+	waitForQueueUpdateRunsGreaterThan(t, queue, 2)
+	assert.EqualValues(t, 2, ciBuildCalls.Load(), "CI jobs must not be triggered again after succeeding")
+}
