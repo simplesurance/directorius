@@ -71,24 +71,26 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 		stats.Seen++
 
 		actions := a.evaluateActions(ghPR)
-		if len(actions) > 0 {
-			stats.PRsOutOfSync++
+		if len(actions) == 0 {
+			continue
 		}
 
+		stats.PRsOutOfSync++
+
+		pr, err := NewPullRequest(ghPR.Number, ghPR.Branch, ghPR.Author, ghPR.Title, ghPR.Link)
+		if err != nil {
+			return fmt.Errorf("pr information retrieved from github is incomplete: %w", err)
+		}
+		pr.SetAssignees(ghPR.Assignees)
+
+		prLogger := logger.With(pr.LogFields...)
+
 		for _, action := range actions {
-			pr, err := NewPullRequest(ghPR.Number, ghPR.Branch, ghPR.Author, ghPR.Title, ghPR.Link)
-			if err != nil {
-				return fmt.Errorf("pr information retrieved from github is incomplete: %w", err)
-			}
-			pr.SetAssignees(ghPR.Assignees)
-
-			logger = logger.With(pr.LogFields...)
-
 			switch action {
 			case unlabel:
 				err := a.removeLabel(ctx, owner, repo, pr)
 				if err != nil {
-					logger.Warn(
+					prLogger.Warn(
 						"removing pull request label failed",
 						zap.Error(err),
 					)
@@ -99,19 +101,19 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 			case enqueue:
 				err := a.enqueuePR(ctx, owner, repo, ghPR.BaseBranch, pr)
 				if errors.Is(err, ErrAlreadyExists) {
-					logger.Debug("queue in-sync, pr is already enqueued")
+					prLogger.Debug("queue in-sync, pr is already enqueued")
 					break
 				}
 				if err != nil {
 					stats.Failures++
-					logger.Warn("adding pr to queue failed",
+					prLogger.Warn("adding pr to queue failed",
 						zap.Error(err),
 					)
 					break
 				}
 
 				stats.Enqueued++
-				logger.Info("enqueued pr")
+				prLogger.Info("enqueued pr")
 
 			case resetStatusState:
 				err := createCommitStatus(ctx,
@@ -120,14 +122,14 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 					githubclt.StatusStatePending,
 				)
 				if err != nil {
-					logger.Warn("setting github status state failed", zap.Error(err))
+					prLogger.Warn("setting github status state failed", zap.Error(err))
 					continue
 				}
 
 				stats.StatusStateReset++
 
 			default:
-				logger.DPanic(
+				prLogger.DPanic(
 					"evaluateActions() returned unexpected value",
 					zap.Int("value", int(action)),
 				)
