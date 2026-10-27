@@ -90,7 +90,8 @@ func failedCIJobStatuses() []*githubclt.CIJobStatus {
 			Required: true,
 			Status:   githubclt.CIStatusFailure,
 			JobURL:   jenkinsJobURL(failedCIJobName, "1"),
-		})
+		},
+	)
 }
 
 func TestEvalPRAction_SuspendActionOnNotTriggeredFailedCIStatus(t *testing.T) {

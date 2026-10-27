@@ -195,7 +195,7 @@ func checkRunResultToCiStatus(status githubv4.CheckStatusState, conclusion githu
 		githubv4.CheckStatusStateWaiting:
 		return CIStatusPending, nil
 
-	case (githubv4.CheckStatusStateCompleted):
+	case githubv4.CheckStatusStateCompleted:
 		return checkConclusiontoCIStatus(conclusion)
 
 	default:
@@ -212,7 +212,7 @@ func checkConclusiontoCIStatus(conclusion githubv4.CheckConclusionState) (CIStat
 		githubv4.CheckConclusionStateTimedOut:
 		return CIStatusFailure, nil
 
-	case (githubv4.CheckConclusionStateActionRequired):
+	case githubv4.CheckConclusionStateActionRequired:
 		return CIStatusPending, nil
 
 	case githubv4.CheckConclusionStateNeutral,

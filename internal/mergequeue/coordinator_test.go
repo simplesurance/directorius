@@ -1193,7 +1193,8 @@ func TestInitialSync(t *testing.T) {
 						return
 					}
 				}
-			}).Times(1)
+			},
+		).Times(1)
 	// 2 because we have 2 base branches to which PRs are added and become the first one
 	mockCreateCommitStatusSuccessful(ghClient).Times(2)
 
