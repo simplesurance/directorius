@@ -768,7 +768,7 @@ func (a *Coordinator) processCheckRunEvent(ctx context.Context, logger *zap.Logg
 	logger.Debug("event received")
 
 	if len(branches) == 0 {
-		logger.Info("ignoring event, pull request or branches fields is empty")
+		logger.Debug("ignoring event, pull request or branches fields is empty")
 
 		return
 	}
@@ -849,7 +849,7 @@ func (a *Coordinator) processStatusEvent(ctx context.Context, logger *zap.Logger
 	logger.Debug("event received")
 
 	if len(branches) == 0 {
-		logger.Info("ignorning event, pull request or branches field is empty")
+		logger.Debug("ignoring event, pull request or branches field is empty")
 
 		return
 	}
@@ -986,7 +986,12 @@ func (a *Coordinator) SetPRStaleSinceIfNewerByBranch(
 			continue
 		}
 
-		missing = q.SetPRStaleSinceIfNewerByBranch(branchNames, updatedAt)
+		notFoundInQueue := q.SetPRStaleSinceIfNewerByBranch(branchNames, updatedAt)
+		for b := range missing {
+			if !notFoundInQueue.Contains(b) {
+				delete(missing, b)
+			}
+		}
 	}
 
 	return missing.Slice()

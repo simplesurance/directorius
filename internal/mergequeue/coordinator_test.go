@@ -2203,3 +2203,57 @@ func TestCheckRunEventUpdatesStaleTimestampAndHandlesMissingBaseBranch(t *testin
 	})
 	assert.True(t, pr.GetStateUnchangedSince().After(initialTime), "expected check_run event to update stateUnchangedSince timestamp")
 }
+
+func TestSetPRStaleSinceIfNewerByBranchMultipleQueues(t *testing.T) {
+	l := forwardLogsToTestLogger(t)
+
+	evChan := make(chan *github_prov.Event, 1)
+	t.Cleanup(func() { close(evChan) })
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+	ciClient := mocks.NewMockJenkinsClient(mockctrl)
+
+	autoupdater := newAutoupdater(
+		ghClient,
+		ciClient,
+		evChan,
+		[]Repository{{OwnerLogin: repoOwner, RepositoryName: repo}},
+		true,
+		nil,
+	)
+
+	bbMaster, err := NewBaseBranch(repoOwner, repo, "master")
+	require.NoError(t, err)
+	bbRelease, err := NewBaseBranch(repoOwner, repo, "release")
+	require.NoError(t, err)
+
+	pr1, err := NewPullRequest(1, "pr_branch1", "me", "test pr 1", "")
+	require.NoError(t, err)
+	pr2, err := NewPullRequest(2, "pr_branch2", "me", "test pr 2", "")
+	require.NoError(t, err)
+
+	qMaster := newQueue(bbMaster, l, ghClient, retry.NewRetryer(), autoupdater.CI, queueHeadLabel)
+	t.Cleanup(qMaster.Stop)
+	_, added := qMaster.active.InsertIfNotExist(pr1.Number, pr1)
+	require.True(t, added)
+	autoupdater.queues[bbMaster.BranchID] = qMaster
+
+	qRelease := newQueue(bbRelease, l, ghClient, retry.NewRetryer(), autoupdater.CI, queueHeadLabel)
+	t.Cleanup(qRelease.Stop)
+	_, added = qRelease.active.InsertIfNotExist(pr2.Number, pr2)
+	require.True(t, added)
+	autoupdater.queues[bbRelease.BranchID] = qRelease
+
+	updatedAt := time.Now().Add(time.Minute)
+	notFound := autoupdater.SetPRStaleSinceIfNewerByBranch(
+		context.Background(),
+		repoOwner,
+		repo,
+		[]string{"pr_branch1", "pr_branch2", "unqueued_branch"},
+		updatedAt,
+	)
+
+	assert.Equal(t, []string{"unqueued_branch"}, notFound)
+	assert.Equal(t, updatedAt, pr1.GetStateUnchangedSince())
+	assert.Equal(t, updatedAt, pr2.GetStateUnchangedSince())
+}
