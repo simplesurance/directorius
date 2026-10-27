@@ -46,6 +46,41 @@ func TestUpdatePR_DoesNotCallBaseBranchUpdateIfPRIsNotApproved(t *testing.T) {
 	q.processPR(context.Background(), pr, TaskNone)
 }
 
+func TestProcessPR_DequeuesClosedPRWithoutSettingPendingStatus(t *testing.T) {
+	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
+
+	mockctrl := gomock.NewController(t)
+	ghClient := mocks.NewMockGithubClient(mockctrl)
+
+	bb, err := NewBaseBranch(repoOwner, repo, "main")
+	require.NoError(t, err)
+	q := newQueue(bb, zap.L(), ghClient, retry.NewRetryer(), nil, queueHeadLabel)
+	t.Cleanup(q.Stop)
+
+	pr, err := NewPullRequest(prNR, prBranch, "fho", "test pr", "")
+	require.NoError(t, err)
+
+	_, added := q.active.InsertIfNotExist(pr.Number, pr)
+	require.True(t, added)
+
+	mockReadyForMergeStatus(
+		ghClient, pr.Number,
+		githubclt.ReviewDecisionApproved, githubclt.CIStatusSuccess,
+	).Times(1)
+	ghClient.EXPECT().
+		UpdateBranch(gomock.Any(), gomock.Eq(repoOwner), gomock.Eq(repo), gomock.Eq(pr.Number)).
+		Return(nil, githubclt.ErrPullRequestIsClosed).
+		Times(1)
+	mockSuccessfulGithubRemoveLabelQueueHeadCall(ghClient, pr.Number).Times(1)
+	ghClient.EXPECT().
+		CreateHeadCommitStatus(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(0)
+
+	q.processPR(context.Background(), pr, TaskNone)
+	assert.Equal(t, 0, q.activeLen())
+	assert.Equal(t, 0, q.suspendedLen())
+}
+
 func TestUpdatePRWithBaseReturnsChangedWhenScheduled(t *testing.T) {
 	t.Cleanup(zap.ReplaceGlobals(zaptest.NewLogger(t).Named(t.Name())))
 

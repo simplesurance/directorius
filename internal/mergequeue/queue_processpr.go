@@ -20,6 +20,7 @@ const (
 	ActionUndefined Action = iota
 	ActionNone
 	ActionSuspend
+	ActionDequeue
 	ActionCreatePullRequestComment
 	ActionUpdateStateUnchanged
 	ActionCreateSuccessfulGithubStatus
@@ -45,6 +46,8 @@ func (a Action) String() string {
 		return "none"
 	case ActionSuspend:
 		return "suspend"
+	case ActionDequeue:
+		return "dequeue"
 	case ActionCreatePullRequestComment:
 		return "create pull request comment"
 	case ActionUpdateStateUnchanged:
@@ -95,7 +98,7 @@ func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRe
 	if err != nil {
 		if errors.Is(err, ErrPullRequestIsClosed) {
 			return &requiredActions{
-				Actions: []Action{ActionSuspend},
+				Actions: []Action{ActionDequeue},
 				Reason:  reasonPullRequestClosed,
 			}, nil
 		}

@@ -586,6 +586,15 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 
 			logger.Info("pull request suspended", logfields.Reason(reason))
 
+		case ActionDequeue:
+			if _, err := q.Dequeue(pr.Number, false); err != nil {
+				logger.Error("dequeuing PR failed", zap.Error(err))
+				continue
+			}
+
+			metrics.DequeueOpsInc(&q.baseBranch.BranchID)
+			logger.Info("pull request removed from merge queue", logfields.Reason(reason))
+
 		case ActionCreatePullRequestComment:
 			// use a shorter timeout to prevent that this optional operation blocks for long
 			ctx, cancelFunc := context.WithTimeout(ctx, postCommentTimeout)
