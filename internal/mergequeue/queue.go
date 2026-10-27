@@ -312,6 +312,7 @@ func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest,
 		logger.Debug("pull request removed from suspend queue")
 
 		pr.SetStateUnchangedSince(time.Time{})
+		metrics.DequeueOpsInc(&q.baseBranch.BranchID)
 
 		return pr, nil
 	} else if !errors.Is(err, ErrNotFound) {
@@ -325,6 +326,7 @@ func (q *queue) Dequeue(prNumber int, setPendingStatusState bool) (*PullRequest,
 		return nil, ErrNotFound
 	}
 
+	metrics.DequeueOpsInc(&q.baseBranch.BranchID)
 	q.cancelActionForPR(prNumber)
 	removed.SetStateUnchangedSince(time.Time{})
 
@@ -583,6 +585,7 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 			pr.SetStateUnchangedSinceIfNewer(time.Now())
 
 		case ActionSuspend:
+			// q.suspend calls q.cancelActionForPR, which cancels ctx.
 			if err := q.suspend(pr.Number); err != nil {
 				logger.Error("suspending PR failed", zap.Error(err))
 				continue
@@ -591,12 +594,12 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 			logger.Info("pull request suspended", logfields.Reason(reason))
 
 		case ActionDequeue:
+			// q.Dequeue calls q.cancelActionForPR, which cancels ctx.
 			if _, err := q.Dequeue(pr.Number, false); err != nil {
 				logger.Error("dequeuing PR failed", zap.Error(err))
 				continue
 			}
 
-			metrics.DequeueOpsInc(&q.baseBranch.BranchID)
 			logger.Info("pull request removed from merge queue", logfields.Reason(reason))
 
 		case ActionCreatePullRequestComment:

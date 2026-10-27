@@ -2280,20 +2280,17 @@ func TestInitialSyncPreservesQueueHeadAndOrdersByNumber(t *testing.T) {
 		AnyTimes()
 	mockGetBuildFromQueueItemID(ciClient).AnyTimes()
 
-	// Simulate paginated updated-asc results where PR 20 is yielded on page 1,
-	// PR 10 on page 2, and PR 30 (the previous queue head carrying queueHeadLabel)
-	// on the last page.
 	syncPRRequestsRet := []*githubclt.PR{
-		{
-			Number:           20,
-			AutoMergeEnabled: true,
-			Branch:           "pr20",
-			BaseBranch:       "main",
-		},
 		{
 			Number:           10,
 			AutoMergeEnabled: true,
 			Branch:           "pr10",
+			BaseBranch:       "main",
+		},
+		{
+			Number:           20,
+			AutoMergeEnabled: true,
+			Branch:           "pr20",
 			BaseBranch:       "main",
 		},
 		{

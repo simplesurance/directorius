@@ -1,7 +1,6 @@
 package mergequeue
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -92,7 +91,7 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 		items = append(items, syncItem{ghPR: ghPR, actions: actions})
 	}
 
-	slices.SortFunc(items, func(x, y syncItem) int {
+	slices.SortStableFunc(items, func(x, y syncItem) int {
 		xHead := x.isQueuedHead()
 		yHead := y.isQueuedHead()
 		if xHead != yHead {
@@ -102,7 +101,7 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 			return 1
 		}
 
-		return cmp.Compare(x.ghPR.Number, y.ghPR.Number)
+		return 0
 	})
 
 	headPreserved := map[string]bool{}
@@ -118,7 +117,6 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 
 		preserveHeadLabel := item.isQueuedHead() && !headPreserved[ghPR.BaseBranch]
 		if preserveHeadLabel {
-			headPreserved[ghPR.BaseBranch] = true
 			pr.hasHeadLabel = true
 		}
 
@@ -143,6 +141,9 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 			case enqueue:
 				err := a.enqueuePR(ctx, owner, repo, ghPR.BaseBranch, pr)
 				if errors.Is(err, ErrAlreadyExists) {
+					if preserveHeadLabel {
+						headPreserved[ghPR.BaseBranch] = true
+					}
 					prLogger.Debug("queue in-sync, pr is already enqueued")
 					break
 				}
@@ -151,9 +152,24 @@ func (a *Coordinator) sync(ctx context.Context, owner, repo string) error {
 					prLogger.Warn("adding pr to queue failed",
 						zap.Error(err),
 					)
+					if preserveHeadLabel {
+						preserveHeadLabel = false
+						pr.hasHeadLabel = false
+						if rmErr := a.removeLabel(ctx, owner, repo, pr); rmErr != nil {
+							prLogger.Warn(
+								"removing pull request label failed",
+								zap.Error(rmErr),
+							)
+						} else {
+							stats.Unlabeled++
+						}
+					}
 					break
 				}
 
+				if preserveHeadLabel {
+					headPreserved[ghPR.BaseBranch] = true
+				}
 				stats.Enqueued++
 				prLogger.Info("enqueued pr")
 

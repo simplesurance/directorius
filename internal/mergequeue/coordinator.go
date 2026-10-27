@@ -168,7 +168,13 @@ func (a *Coordinator) eventLoop() {
 
 		case <-periodicTrigger.C:
 			a.queuesLock.Lock()
-			for _, q := range a.queues {
+			for branchID, q := range a.queues {
+				if q.IsEmpty() {
+					q.Wait()
+					delete(a.queues, branchID)
+					a.Logger.With(q.baseBranch.Logfields...).Debug("removed empty queue for base branch")
+					continue
+				}
 				q.ScheduleProcessPR(context.Background(), TaskNone)
 				a.Logger.Debug("periodic run scheduled", q.baseBranch.Logfields...)
 			}
@@ -949,10 +955,13 @@ func (a *Coordinator) Dequeue(_ context.Context, baseBranch *BaseBranch, prNumbe
 
 	pr, err := q.Dequeue(prNumber, setPendingStatusState)
 	if err != nil {
+		if q.IsEmpty() {
+			q.Wait()
+			delete(a.queues, baseBranch.BranchID)
+			a.Logger.With(baseBranch.Logfields...).Debug("removed empty queue for base branch")
+		}
 		return nil, fmt.Errorf("removing pr from merge queue failed: %w", err)
 	}
-
-	metrics.DequeueOpsInc(&baseBranch.BranchID)
 
 	if q.IsEmpty() {
 		q.Wait()
