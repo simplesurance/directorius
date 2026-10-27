@@ -1,6 +1,7 @@
 package mergequeue
 
 import (
+	"bytes"
 	"embed"
 	"errors"
 	"fmt"
@@ -253,10 +254,14 @@ func (h *HTTPService) HandlerStaticFiles() http.Handler {
 func (h *HTTPService) HandlerListFunc(respWr http.ResponseWriter, _ *http.Request) {
 	data := h.autoupdater.httpListData()
 
-	err := h.templates.ExecuteTemplate(respWr, "list.html.tmpl", data)
-	if err != nil {
-		h.logger.Info("applying template and sending it back as http response failed", zap.Error(err))
+	var buf bytes.Buffer
+	if err := h.templates.ExecuteTemplate(&buf, "list.html.tmpl", data); err != nil {
+		h.logger.Error("applying template failed", zap.Error(err))
 		http.Error(respWr, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if _, err := buf.WriteTo(respWr); err != nil {
+		h.logger.Debug("writing http response failed", zap.Error(err))
 	}
 }

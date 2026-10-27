@@ -2,6 +2,9 @@ package mergequeue
 
 import (
 	"bytes"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -61,4 +64,48 @@ func TestListTemplateRendersAuthorAndAssignees(t *testing.T) {
 	require.Contains(t, out, "paused-banner")
 	require.Contains(t, out, `<span class="pill">paused</span>`)
 	require.NotContains(t, out, "ZgotmplZ", "a value was rejected by html/template escaping")
+}
+
+type failingResponseWriter struct {
+	header           http.Header
+	wroteHeader      bool
+	writeHeaderCalls int
+	statusCode       int
+}
+
+func (w *failingResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingResponseWriter) Write([]byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return 0, errors.New("write: broken pipe")
+}
+
+func (w *failingResponseWriter) WriteHeader(statusCode int) {
+	w.wroteHeader = true
+	w.writeHeaderCalls++
+	w.statusCode = statusCode
+}
+
+func TestHandlerListFuncDoesNotWriteErrorHeaderOnBrokenPipe(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	h := NewHTTPService(&Coordinator{
+		Config: &Config{
+			Logger: logger,
+			CI:     &CI{Client: NewDryCIClient(logger)},
+		},
+	}, "/")
+
+	rw := &failingResponseWriter{}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	h.HandlerListFunc(rw, req)
+
+	require.Equal(t, 1, rw.writeHeaderCalls)
+	require.Equal(t, http.StatusOK, rw.statusCode)
 }
