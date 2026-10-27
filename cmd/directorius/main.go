@@ -224,7 +224,8 @@ func initLogFmtLogger(config *cfg.Config, logLevel zapcore.Level) *zap.Logger {
 	logger := zap.New(zapcore.NewCore(
 		zaplogfmt.NewEncoder(cfg),
 		os.Stdout,
-		logLevel),
+		logLevel,
+	),
 	)
 
 	return logger
