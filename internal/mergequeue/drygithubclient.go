@@ -32,13 +32,27 @@ func (c *DryGithubClient) UpdateBranch(context.Context, string, string, int) (*g
 	return &githubclt.UpdateBranchResult{HeadCommitID: dryGitHubClientHeadCommitID}, nil
 }
 
-func (c *DryGithubClient) ReadyForMerge(context.Context, string, string, int) (*githubclt.ReadyForMergeStatus, error) {
+// ReadyForMerge simulates that the pull request is approved and all checks are
+// successful.
+// The information about whether the pull request is closed, has auto-merge
+// enabled and its labels is retrieved from GitHub. The queue uses them to decide
+// if the pull request must stay queued, simulating them would dequeue it.
+func (c *DryGithubClient) ReadyForMerge(ctx context.Context, owner, repo string, prNumber int) (*githubclt.ReadyForMergeStatus, error) {
+	status, err := c.clt.ReadyForMerge(ctx, owner, repo, prNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	c.logger.Info("simulated fetching ready for merge status, pr is approved, all checks successful")
 
 	return &githubclt.ReadyForMergeStatus{
 		ReviewDecision: githubclt.ReviewDecisionApproved,
 		CIStatus:       githubclt.CIStatusSuccess,
 		Commit:         dryGitHubClientHeadCommitID,
+
+		Closed:           status.Closed,
+		AutoMergeEnabled: status.AutoMergeEnabled,
+		Labels:           status.Labels,
 	}, nil
 }
 

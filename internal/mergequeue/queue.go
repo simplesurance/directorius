@@ -101,8 +101,38 @@ type queue struct {
 	// pull-request in the active queue
 	headLabel string
 
+	// trigger defines the conditions of which one must be met, for a pull
+	// request to stay in the queue.
+	trigger enqueueTrigger
+	// onEmpty is optional. It is called, without blocking, when the queue
+	// became empty because the queue itself dequeued a pull request that
+	// was not eligible anymore. It is called from the [queue.actionPool],
+	// it must not wait for it.
+	onEmpty func()
+
 	// paused can be set to true to skip processPR operations.
 	paused atomic.Bool
+}
+
+type queueOption func(*queue)
+
+// withEnqueueTrigger configures the conditions that a pull request must
+// fulfill to stay in the queue. If none is met, the pull request is dequeued
+// the next time its status is evaluated.
+// If neither onAutomerge is true nor labels is non-empty, the condition is not
+// verified.
+func withEnqueueTrigger(onAutomerge bool, labels set.Set[string]) queueOption {
+	return func(q *queue) {
+		q.trigger = enqueueTrigger{OnAutomerge: onAutomerge, Labels: labels}
+	}
+}
+
+// withOnEmpty configures a function that is called when the queue dequeued a
+// pull request on its own and became empty.
+func withOnEmpty(fn func()) queueOption {
+	return func(q *queue) {
+		q.onEmpty = fn
+	}
 }
 
 type runningOperation struct {
@@ -110,7 +140,15 @@ type runningOperation struct {
 	cancelFunc context.CancelFunc
 }
 
-func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retryer *retry.Retryer, ci *CI, headLabel string) *queue {
+func newQueue(
+	base *BaseBranch,
+	logger *zap.Logger,
+	ghClient GithubClient,
+	retryer *retry.Retryer,
+	ci *CI,
+	headLabel string,
+	opts ...queueOption,
+) *queue {
 	q := queue{
 		baseBranch:               *base,
 		active:                   orderedmap.New[int, *PullRequest](orderBefore),
@@ -123,6 +161,10 @@ func newQueue(base *BaseBranch, logger *zap.Logger, ghClient GithubClient, retry
 		updateBranchPollInterval: updateBranchPollInterval,
 		headLabel:                headLabel,
 		ci:                       ci,
+	}
+
+	for _, opt := range opts {
+		opt(&q)
 	}
 
 	if qm, err := newQueueMetrics(base.BranchID); err == nil {
@@ -176,6 +218,13 @@ func (q *queue) IsEmpty() bool {
 	defer q.lock.Unlock()
 
 	return q.active.Len() == 0 && len(q.suspended) == 0
+}
+
+// notifyIfEmpty calls the onEmpty function if it is set and the queue is empty.
+func (q *queue) notifyIfEmpty() {
+	if q.onEmpty != nil && q.IsEmpty() {
+		q.onEmpty()
+	}
 }
 
 func (q *queue) _activePullRequests() []*PullRequest {
@@ -508,6 +557,11 @@ func (q *queue) isPRStale(pr *PullRequest) bool {
 // and the actions to undertake.
 // The PR must be the first in the active queue otherwise nothing is done.
 //
+// If the PR is closed or does not meet the queue trigger condition anymore
+// (auto-merge was disabled, the trigger label was removed), it is dequeued.
+// GitHub webhook events that report it can be lost, therefore the state at
+// GitHub is verified.
+//
 // If the base-branch contains changes that are not in the pull request branch,
 // updating it, by merging the base-branch into the PR branch, is schedule via
 // the GitHub API. If updating is not possible because a merge-conflict exist
@@ -595,12 +649,22 @@ func (q *queue) processPR(ctx context.Context, pr *PullRequest, task Task) {
 
 		case ActionDequeue:
 			// q.Dequeue calls q.cancelActionForPR, which cancels ctx.
-			if _, err := q.Dequeue(pr.Number, false); err != nil {
+			if _, err := q.Dequeue(pr.Number, actions.ResetStatusOnDequeue); err != nil {
+				if errors.Is(err, ErrNotFound) {
+					// A webhook event dequeued the PR while its
+					// status was evaluated, it is not a failure.
+					logger.Debug("pull request was already removed from the merge queue",
+						zap.Error(err), logfields.Reason(reason))
+					q.notifyIfEmpty()
+					continue
+				}
+
 				logger.Error("dequeuing PR failed", zap.Error(err))
 				continue
 			}
 
 			logger.Info("pull request removed from merge queue", logfields.Reason(reason))
+			q.notifyIfEmpty()
 
 		case ActionCreatePullRequestComment:
 			// use a shorter timeout to prevent that this optional operation blocks for long
@@ -750,6 +814,9 @@ func (q *queue) prReadyForMergeStatus(ctx context.Context, pr *PullRequest) (*gi
 				logfields.ReviewDecision(string(status.ReviewDecision)),
 				logfields.CIStatusSummary(string(status.CIStatus)),
 				zap.Any("github.ci_statuses", status.Statuses),
+				zap.Bool("github.pull_request_closed", status.Closed),
+				zap.Bool("github.auto_merge_enabled", status.AutoMergeEnabled),
+				zap.Strings("github.labels", status.Labels),
 			}, loggingFields...)...,
 		)
 
@@ -980,14 +1047,46 @@ func (q *queue) _suspendedPRsbyBranch(branches set.Set[string]) (
 	return result, notFound
 }
 
+// isSuspended returns true if the pull request with the given number is in the
+// suspend queue.
+func (q *queue) isSuspended(prNumber int) bool {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	_, exist := q.suspended[prNumber]
+	return exist
+}
+
 func (q *queue) resumeIfPRMergeStatusPositive(ctx context.Context, logger *zap.Logger, pr *PullRequest) error {
-	if _, exist := q.suspended[pr.Number]; !exist {
+	if !q.isSuspended(pr.Number) {
 		return ErrNotFound
 	}
 
 	status, err := q.prReadyForMergeStatus(ctx, pr)
 	if err != nil {
 		return fmt.Errorf("retrieving ready for merge status failed: %w", err)
+	}
+
+	// The webhook event that removes a PR from the queue (auto_merge_disabled,
+	// unlabeled, closed) can be lost. Check it here, otherwise the PR would
+	// be moved to the active queue and block it, although GitHub will
+	// never merge it.
+	if req := q.dequeueRequired(status); req != nil {
+		if _, err := q.Dequeue(pr.Number, req.ResetStatus); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				// A webhook event dequeued the PR while the status
+				// was retrieved, it is not a failure.
+				q.notifyIfEmpty()
+				return ErrNotFound
+			}
+
+			return fmt.Errorf("removing pull request from merge queue failed: %w", err)
+		}
+
+		logger.Info("pull request removed from merge queue", logfields.Reason(req.Reason))
+		q.notifyIfEmpty()
+
+		return nil
 	}
 
 	if status.ReviewDecision != githubclt.ReviewDecisionApproved {

@@ -3,8 +3,10 @@ package githubclt
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/shurcooL/githubv4"
+	"go.uber.org/zap"
 )
 
 // CIStatus is the result or current status of a CI job.
@@ -39,14 +41,32 @@ type CIJobStatus struct {
 
 // ReadyForMergeStatus represent the information deciding if a pull request is
 // ready to be merged. It contains the review decision and CI job results.
+// It also contains the information that determines if the pull request is
+// still eligible to be in a merge queue: if it is open, if auto-merge is
+// enabled and its labels.
 type ReadyForMergeStatus struct {
 	ReviewDecision ReviewDecision
 	CIStatus       CIStatus
 	Statuses       []*CIJobStatus
 	Commit         string
+
+	// Closed is true if the pull request is closed or merged.
+	Closed bool
+	// AutoMergeEnabled is true if auto-merge is enabled for the pull
+	// request.
+	AutoMergeEnabled bool
+	// Labels contains the names of the labels of the pull request.
+	// At most the first [maxLabels] labels are retrieved.
+	Labels []string
 }
 
+// maxLabels is the max. number of pull request labels that are retrieved.
+// It must be kept in sync with the labels(first: N) argument in the query.
+const maxLabels = 100
+
 // ReadyForMerge returns the [review decision] and [status check rollup] for a PR.
+// It additionally returns if the PR is closed, if auto-merge is enabled and the
+// labels of the PR.
 //
 // The status of checks that are not required is ignored.
 // If a required check failed the returned [ReadyForMerge.CIStatus] is
@@ -73,6 +93,10 @@ func (clt *Client) ReadyForMerge(ctx context.Context, owner, repo string, prNumb
 		CIStatus:       overallCIStatus(queryResult.StatusCheckRollupState, statuses),
 		Statuses:       statuses,
 		Commit:         queryResult.Commit,
+
+		Closed:           queryResult.Closed,
+		AutoMergeEnabled: queryResult.AutoMergeEnabled,
+		Labels:           queryResult.Labels,
 	}, nil
 }
 
@@ -244,6 +268,9 @@ type queryCIStatusResult struct {
 	CheckRuns                   []*queryCheckStatus
 	StatusContext               []*queryStatusContext
 	Commit                      string
+	Closed                      bool
+	AutoMergeEnabled            bool
+	Labels                      []string
 }
 
 func (clt *Client) reviewAndCIStatus(ctx context.Context, owner, repo string, prNumber int) (*queryCIStatusResult, error) {
@@ -251,6 +278,17 @@ func (clt *Client) reviewAndCIStatus(ctx context.Context, owner, repo string, pr
 		Repository struct {
 			PullRequest struct {
 				ReviewDecision githubv4.PullRequestReviewDecision
+				// Closed is also true for merged pull requests.
+				Closed           bool
+				AutoMergeRequest struct {
+					EnabledAt time.Time
+				}
+				Labels struct {
+					PageInfo PageInfo
+					Nodes    []struct {
+						Name string
+					}
+				} `graphql:"labels(first: 100)"`
 
 				BaseRef struct {
 					BranchProtectionRule struct {
@@ -336,6 +374,19 @@ func (clt *Client) reviewAndCIStatus(ctx context.Context, owner, repo string, pr
 			result.StatusCheckRollupState = commitsNode.StatusCheckRollup.State
 			result.RequiredStatusCheckContexts = q.Repository.PullRequest.BaseRef.BranchProtectionRule.RequiredStatusCheckContexts
 			result.Commit = prHEADCommitID
+			result.Closed = q.Repository.PullRequest.Closed
+			result.AutoMergeEnabled = !q.Repository.PullRequest.AutoMergeRequest.EnabledAt.IsZero()
+			result.Labels = make([]string, 0, len(q.Repository.PullRequest.Labels.Nodes))
+			for _, label := range q.Repository.PullRequest.Labels.Nodes {
+				result.Labels = append(result.Labels, label.Name)
+			}
+
+			if q.Repository.PullRequest.Labels.PageInfo.HasNextPage {
+				clt.logger.Warn("incomplete pr labels retrieved, more label pages are available but only the first page was fetched, pagination is not implemented",
+					zap.Int("github.pull_request", prNumber),
+					zap.Int("github.labels_fetched", maxLabels),
+				)
+			}
 
 			return &result, nil
 		}
