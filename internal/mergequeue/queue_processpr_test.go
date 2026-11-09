@@ -22,7 +22,7 @@ type evalPRTest struct {
 	GhClt *mocks.MockGithubClient
 }
 
-func initEvalPRActionTest(t *testing.T) *evalPRTest {
+func initEvalPRActionTest(t *testing.T, queueOpts ...queueOption) *evalPRTest {
 	l := forwardLogsToTestLogger(t)
 
 	mockctrl := gomock.NewController(t, gomock.WithOverridableExpectations())
@@ -39,7 +39,7 @@ func initEvalPRActionTest(t *testing.T) *evalPRTest {
 	bb, err := NewBaseBranch(repoOwner, repo, "main")
 	require.NoError(t, err)
 	ci := &CI{Client: ciClient, logger: l}
-	q := newQueue(bb, l, ghClient, retry.NewRetryer(), ci, queueHeadLabel)
+	q := newQueue(bb, l, ghClient, retry.NewRetryer(), ci, queueHeadLabel, queueOpts...)
 	t.Cleanup(q.Stop)
 
 	pr, err := NewPullRequest(prNR, prBranch, "me", "test pr", "")

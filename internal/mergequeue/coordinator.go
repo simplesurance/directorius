@@ -60,6 +60,13 @@ type Coordinator struct {
 	// shutdownChan can be closed to communicate to the event loop go-routine to terminate.
 	shutdownChan chan struct{}
 
+	// emptiedQueues receives the ID of queues that dequeued their last pull
+	// request on their own, because it was not eligible to be queued
+	// anymore. The event loop removes them.
+	// Queues can not remove themselves, they run in the context of their own
+	// action pool, that the removal has to wait for.
+	emptiedQueues chan BranchID
+
 	// processedEventCnt counts the number of events that were processed.
 	// It is currently only used in testcase to delay checks until a send
 	// event was processed.
@@ -83,6 +90,7 @@ func NewCoordinator(cfg Config) *Coordinator {
 		wg:                  sync.WaitGroup{},
 		periodicTriggerIntv: defPeriodicTriggerInterval,
 		shutdownChan:        make(chan struct{}, 1),
+		emptiedQueues:       make(chan BranchID, 16),
 	}
 
 	cfg.setDefaults()
@@ -166,6 +174,9 @@ func (a *Coordinator) eventLoop() {
 
 			a.processEvent(context.Background(), event)
 
+		case branchID := <-a.emptiedQueues:
+			a.removeQueueIfEmpty(branchID)
+
 		case <-periodicTrigger.C:
 			a.queuesLock.Lock()
 			for branchID, q := range a.queues {
@@ -184,6 +195,33 @@ func (a *Coordinator) eventLoop() {
 			a.Logger.Info("event loop terminating")
 			return
 		}
+	}
+}
+
+// removeQueueIfEmpty removes the queue for the branch, if it is empty.
+// It must not be called from a queue operation, it waits for the queue's
+// running operations to finish.
+func (a *Coordinator) removeQueueIfEmpty(branchID BranchID) {
+	a.queuesLock.Lock()
+	defer a.queuesLock.Unlock()
+
+	q, exist := a.queues[branchID]
+	if !exist || !q.IsEmpty() {
+		return
+	}
+
+	q.Wait()
+	delete(a.queues, branchID)
+	a.Logger.With(q.baseBranch.Logfields...).Debug("removed empty queue for base branch")
+}
+
+// queueEmptied is called by a queue when it became empty because it dequeued
+// a pull request on its own. It does not block, if the notification can not be
+// delivered the periodic run of the event loop removes the empty queue.
+func (a *Coordinator) queueEmptied(branchID BranchID) {
+	select {
+	case a.emptiedQueues <- branchID:
+	default:
 	}
 }
 
@@ -921,6 +959,8 @@ func (a *Coordinator) Enqueue(_ context.Context, baseBranch *BaseBranch, pr *Pul
 			a.Retryer,
 			a.CI,
 			a.HeadLabel,
+			withEnqueueTrigger(a.TriggerOnAutomerge, a.TriggerLabels),
+			withOnEmpty(func() { a.queueEmptied(baseBranch.BranchID) }),
 		)
 
 		a.queues[baseBranch.BranchID] = q

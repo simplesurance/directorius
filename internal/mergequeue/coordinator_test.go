@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -140,11 +141,22 @@ type mergeStatusMock struct {
 	mu sync.Mutex
 }
 
+// mockedTriggerLabel is the trigger label that tests configure for the
+// coordinator. mockReadyForMergeStatus returns it as label of the pull request.
+const mockedTriggerLabel = "queue-add"
+
+// mockReadyForMergeStatus mocks ReadyForMerge to return an open pull request
+// that has auto-merge enabled and the mockedTriggerLabel, so that it is
+// eligible to be in a queue regardless of the configured trigger.
+// To simulate that it is not eligible anymore, change AutoMergeEnabled and
+// Labels of the returned mock while holding its mutex.
 func mockReadyForMergeStatus(clt *mocks.MockGithubClient, prNumber int, reviewDecision githubclt.ReviewDecision, checkState githubclt.CIStatus) *mergeStatusMock {
 	res := &mergeStatusMock{
 		ReadyForMergeStatus: githubclt.ReadyForMergeStatus{
-			ReviewDecision: reviewDecision,
-			CIStatus:       checkState,
+			ReviewDecision:   reviewDecision,
+			CIStatus:         checkState,
+			AutoMergeEnabled: true,
+			Labels:           []string{mockedTriggerLabel},
 			Statuses: []*githubclt.CIJobStatus{{
 				Name:     ciJobExpectedName,
 				Status:   checkState,
@@ -163,6 +175,7 @@ func mockReadyForMergeStatus(clt *mocks.MockGithubClient, prNumber int, reviewDe
 
 			// return a copy of the object to avoid race conditions
 			status := res.ReadyForMergeStatus
+			status.Labels = slices.Clone(res.Labels)
 			status.Statuses = make([]*githubclt.CIJobStatus, len(res.Statuses))
 			for i, s := range res.Statuses {
 				sCopy := *s

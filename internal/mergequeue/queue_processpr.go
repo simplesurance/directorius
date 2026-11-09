@@ -34,6 +34,11 @@ type requiredActions struct {
 	Reason       string
 	HeadCommitID string
 
+	// ResetStatusOnDequeue is only used when ActionDequeue is part of
+	// Actions. If it is true, the github commit status is reset to pending
+	// when the pull request is dequeued.
+	ResetStatusOnDequeue bool
+
 	// ExpectedCIRuns is only set when ActionTriggerCIJobs is part of Actions.
 	ExpectedCIRuns []string
 }
@@ -68,7 +73,6 @@ func (a Action) String() string {
 func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRequest) (*requiredActions, error) {
 	const (
 		reasonNotApproved           = "not approved"
-		reasonPullRequestClosed     = "pull request is closed"
 		reasonMergeConflict         = "update with base branch failed: merge conflict"
 		reasonBranchUpdatedWithBase = "pull request branch has been updated with base branch"
 		reasonIsStale               = "pull request is stale"
@@ -82,6 +86,22 @@ func (q *queue) evalPRAction(ctx context.Context, logger *zap.Logger, pr *PullRe
 	status, err := q.prReadyForMergeStatus(ctx, pr)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving ready to merge status from github failed: %w", err)
+	}
+
+	// The webhook event that removes a PR from the queue (auto_merge_disabled,
+	// unlabeled, closed) can be lost. Check it here, otherwise the PR blocks
+	// the head of the queue, although GitHub will never merge it.
+	// This must be done before anything else, to prevent that the branch of the
+	// PR is updated, it is labeled or CI jobs are triggered for it.
+	if req := q.dequeueRequired(status); req != nil {
+		// ActionDequeue cancels the running processPR context via
+		// cancelActionForPR, so no context-using actions may follow it.
+		return &requiredActions{
+			Actions:              []Action{ActionDequeue},
+			Reason:               req.Reason,
+			HeadCommitID:         status.Commit,
+			ResetStatusOnDequeue: req.ResetStatus,
+		}, nil
 	}
 
 	if status.ReviewDecision != githubclt.ReviewDecisionApproved {
